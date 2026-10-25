@@ -53,4 +53,22 @@ inline void destruirTablero(Tablero& t) { // libera el mutex al cerrar la mesa
     pthread_mutex_destroy(&t.mtx);
 }
 
+
+inline bool moverFicha(Tablero& t, int desde, int hacia, Celda tipo) { // intenta mover, true si lo logro
+    pthread_mutex_lock(&t.mtx);
+    bool ok = false;
+    if (t.celdas[desde] == tipo && t.celdas[hacia] == VACIA) { // sigo en mi casilla y el destino esta libre
+        for (int v : t.ady[desde]) {
+            if (v == hacia) { // el destino es adyacente
+                t.celdas[desde] = VACIA;
+                t.celdas[hacia] = tipo;
+                ok = true;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&t.mtx);
+    return ok;
+}
+
 #endif
