@@ -71,4 +71,28 @@ inline bool moverFicha(Tablero& t, int desde, int hacia, Celda tipo) { // intent
     return ok;
 }
 
+
+inline bool capturarPerro(Tablero& t, int desde, int sobre, int hacia) { // salto del puma, true si captura
+    pthread_mutex_lock(&t.mtx);
+    bool ok = false;
+    if (t.celdas[desde] == PUMA && t.celdas[sobre] == PERRO && t.celdas[hacia] == VACIA) {
+        t.celdas[desde] = VACIA;  // el puma sale de su casilla
+        t.celdas[sobre] = VACIA;  // el perro desaparece
+        t.celdas[hacia] = PUMA;   // el puma cae al otro lado
+        t.capturados++;
+        ok = true;
+    }
+    pthread_mutex_unlock(&t.mtx);
+    return ok;
+}
+
+inline int saltoCuadricula(int desde, int sobre) { // nodo de aterrizaje en linea recta, o -1 si no existe
+    if (desde < 3 || sobre < 3) return -1; // solo la cuadricula, el techo va aparte
+    int f1 = (desde - 3) / COLS, c1 = (desde - 3) % COLS;
+    int f2 = (sobre - 3) / COLS, c2 = (sobre - 3) % COLS;
+    int f3 = 2 * f2 - f1, c3 = 2 * c2 - c1; // un paso mas en la misma direccion
+    if (f3 < 0 || f3 >= FILAS || c3 < 0 || c3 >= COLS) return -1; // se sale del tablero
+    return nodo(f3, c3);
+}
+
 #endif
