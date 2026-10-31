@@ -4,13 +4,21 @@
 int main() {
     Tablero t;
     iniciarTablero(t);
-    t.celdas[nodo(2, 2)] = PUMA;
-    t.celdas[nodo(2, 3)] = PERRO;
-    int aterriza = saltoCuadricula(nodo(2, 2), nodo(2, 3));
-    std::cout << "aterriza en: " << aterriza << " (esperado " << nodo(2, 4) << ")" << std::endl;
-    std::cout << "captura: " << capturarPerro(t, nodo(2, 2), nodo(2, 3), aterriza) << std::endl;
-    std::cout << "capturados: " << t.capturados << std::endl;
-    std::cout << "salto fuera del tablero: " << saltoCuadricula(nodo(2, 3), nodo(2, 4)) << std::endl;
+    std::cout << "saltos: " << todosLosSaltos().size() << " (esperado 60)" << std::endl;
+
+    t.celdas[nodo(4, 4)] = PUMA; // puma en una esquina, rodeado
+    t.celdas[nodo(3, 4)] = PERRO;
+    t.celdas[nodo(4, 3)] = PERRO;
+    t.celdas[nodo(2, 4)] = PERRO; // bloquea el aterrizaje
+    t.celdas[nodo(4, 2)] = PERRO;
+    std::cout << "acorralado: " << ganador(t) << " (esperado 2)" << std::endl;
+
+    t.celdas[nodo(2, 4)] = VACIA; // ahora puede capturar saltando
+    std::cout << "con salida por captura: " << ganador(t) << " (esperado 0)" << std::endl;
+
+    t.capturados = 6;
+    std::cout << "6 capturas: " << ganador(t) << " (esperado 1)" << std::endl;
+
     destruirTablero(t);
     return 0;
 }
