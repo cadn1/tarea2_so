@@ -2,6 +2,7 @@
 #define TABLERO_HPP
 
 #include <vector>
+#include <array>
 #include <pthread.h>
 
 enum Celda { VACIA, PUMA, PERRO }; // que hay en cada casilla
@@ -93,6 +94,58 @@ inline int saltoCuadricula(int desde, int sobre) { // nodo de aterrizaje en line
     int f3 = 2 * f2 - f1, c3 = 2 * c2 - c1; // un paso mas en la misma direccion
     if (f3 < 0 || f3 >= FILAS || c3 < 0 || c3 >= COLS) return -1; // se sale del tablero
     return nodo(f3, c3);
+}
+
+
+const bool SALTOS_TECHO = false; // saltos que cruzan el techo
+
+inline std::vector<std::array<int,3>> todosLosSaltos() { // triples (desde, sobre, hacia) en linea recta
+    std::vector<std::array<int,3>> s;
+    auto agregar = [&](int a, int b, int c) { s.push_back(std::array<int,3>{{a, b, c}}); };
+    const int dir[4][2] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
+    for (int f = 0; f < FILAS; f++)
+        for (int c = 0; c < COLS; c++)
+            for (const auto& d : dir) {
+                int f3 = f + 2 * d[0], c3 = c + 2 * d[1];
+                if (f3 < 0 || f3 >= FILAS || c3 < 0 || c3 >= COLS) continue; // el aterrizaje se sale
+                agregar(nodo(f, c), nodo(f + d[0], c + d[1]), nodo(f3, c3));
+            }
+    if (SALTOS_TECHO) { // lineas rectas que cruzan el techo, ida y vuelta
+        agregar(nodo(0, 0), TECHO_IZQ, TRONO);
+        agregar(TRONO, TECHO_IZQ, nodo(0, 0));
+        agregar(nodo(0, 4), TECHO_DER, TRONO);
+        agregar(TRONO, TECHO_DER, nodo(0, 4));
+        agregar(nodo(1, 1), nodo(0, 1), TECHO_IZQ);
+        agregar(TECHO_IZQ, nodo(0, 1), nodo(1, 1));
+        agregar(nodo(1, 3), nodo(0, 3), TECHO_DER);
+        agregar(TECHO_DER, nodo(0, 3), nodo(1, 3));
+        agregar(nodo(1, 2), nodo(0, 2), TRONO);
+        agregar(TRONO, nodo(0, 2), nodo(1, 2));
+    }
+    return s;
+}
+
+enum Ganador { NADIE, GANA_PUMA, GANAN_PERROS }; // resultado de la partida
+
+inline bool pumaSinMovimientos(const Tablero& t) { // el que llama ya tiene el mutex
+    int p = -1;
+    for (int i = 0; i < NODOS; i++)
+        if (t.celdas[i] == PUMA) p = i;
+    if (p < 0) return false; // no hay puma en el tablero
+    for (int v : t.ady[p]) // movimiento simple
+        if (t.celdas[v] == VACIA) return false;
+    for (const auto& s : todosLosSaltos()) // captura legal
+        if (s[0] == p && t.celdas[s[1]] == PERRO && t.celdas[s[2]] == VACIA) return false;
+    return true;
+}
+
+inline Ganador ganador(Tablero& t) { // revisa la victoria bajo el candado
+    pthread_mutex_lock(&t.mtx);
+    Ganador g = NADIE;
+    if (t.capturados >= 6) g = GANA_PUMA;
+    else if (pumaSinMovimientos(t)) g = GANAN_PERROS;
+    pthread_mutex_unlock(&t.mtx);
+    return g;
 }
 
 #endif
