@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <array>
+#include <iostream>
 #include <pthread.h>
 
 enum Celda { VACIA, PUMA, PERRO }; // que hay en cada casilla
@@ -20,6 +21,7 @@ struct Tablero {
     Celda celdas[NODOS];          // estado de cada nodo
     std::vector<int> ady[NODOS];  // vecinos de cada nodo
     int capturados;               // perros capturados por el puma
+    bool fin;                     // la partida termino, los hilos deben parar
     pthread_mutex_t mtx;          // un solo candado para todo el tablero
 };
 
@@ -34,6 +36,7 @@ inline void iniciarTablero(Tablero& t) { // vacia el tablero, arma las aristas y
         t.ady[i].clear();
     }
     t.capturados = 0;
+    t.fin = false;
     for (int f = 0; f < FILAS; f++)
         for (int c = 0; c < COLS; c++) {
             if (c < COLS - 1) unir(t, nodo(f, c), nodo(f, c + 1));  // horizontal
@@ -156,7 +159,7 @@ inline const char* obtenerNombre(Celda c) {
 
 inline void imprimirTablero(Tablero& t) {
     pthread_mutex_lock(&t.mtx);
-    std::cout << "\nTABLERO INICIAL:\n";
+    std::cout << "\nTABLERO:\n";
     
     // TRONO
     std::cout << "                        " << obtenerNombre(t.celdas[TRONO]) << "\n";
@@ -190,6 +193,20 @@ inline void imprimirTablero(Tablero& t) {
             std::cout << "  |           |           |           |           |\n";
         }
     }
+    pthread_mutex_unlock(&t.mtx);
+}
+
+
+inline bool partidaTerminada(Tablero& t) { // los hilos preguntan esto en cada ciclo
+    pthread_mutex_lock(&t.mtx);
+    bool f = t.fin;
+    pthread_mutex_unlock(&t.mtx);
+    return f;
+}
+
+inline void terminarPartida(Tablero& t) { // el juez avisa que se acabo
+    pthread_mutex_lock(&t.mtx);
+    t.fin = true;
     pthread_mutex_unlock(&t.mtx);
 }
 
