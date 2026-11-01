@@ -3,21 +3,33 @@
 
 int main() {
     Tablero t;
+    
+    // CASO 1 : PUMA ACORRALADO
     iniciarTablero(t);
-    std::cout << "saltos: " << todosLosSaltos().size() << " (esperado 60)" << std::endl;
+    t.celdas[TRONO] = PUMA; 
+    t.celdas[TECHO_IZQ] = PERRO;
+    t.celdas[TECHO_DER] = PERRO;
+    t.celdas[nodo(0, 2)] = PERRO; // Nodo vertical central
+    std::cout << "\n[FOTO 1] ACORRALADO EN EL TRONO:";
+    imprimirTablero(t);
+    std::cout << "Resultado: " << ganador(t) << " (esperado 2)\n";
 
-    t.celdas[nodo(4, 4)] = PUMA; // puma en una esquina, rodeado
-    t.celdas[nodo(3, 4)] = PERRO;
-    t.celdas[nodo(4, 3)] = PERRO;
-    t.celdas[nodo(2, 4)] = PERRO; // bloquea el aterrizaje
-    t.celdas[nodo(4, 2)] = PERRO;
-    std::cout << "acorralado: " << ganador(t) << " (esperado 2)" << std::endl;
+    // CASO 2 : PUMA CON ESCAPE
+    iniciarTablero(t);
+    t.celdas[nodo(2, 2)] = PUMA; 
+    t.celdas[nodo(2, 1)] = PERRO; 
+    t.celdas[nodo(2, 3)] = PERRO; 
+    std::cout << "\n[FOTO 2] PUMA EN EL CENTRO CON ESPACIO:";
+    imprimirTablero(t);
+    std::cout << "Resultado: " << ganador(t) << " (esperado 0)\n";
 
-    t.celdas[nodo(2, 4)] = VACIA; // ahora puede capturar saltando
-    std::cout << "con salida por captura: " << ganador(t) << " (esperado 0)" << std::endl;
-
+    // CASO 3 : PUMA GANADOR
+    iniciarTablero(t);
+    t.celdas[nodo(4, 0)] = PUMA;
     t.capturados = 6;
-    std::cout << "6 capturas: " << ganador(t) << " (esperado 1)" << std::endl;
+    std::cout << "\n[FOTO 3] VICTORIA CON 6 CAPTURAS:";
+    imprimirTablero(t);
+    std::cout << "Resultado: " << ganador(t) << " (esperado 1)\n";
 
     destruirTablero(t);
     return 0;

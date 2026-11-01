@@ -148,4 +148,49 @@ inline Ganador ganador(Tablero& t) { // revisa la victoria bajo el candado
     return g;
 }
 
+inline const char* obtenerNombre(Celda c) {
+    if (c == PUMA) return "Puma "; 
+    if (c == PERRO) return "Perro";
+    return "  .  "; 
+}
+
+inline void imprimirTablero(Tablero& t) {
+    pthread_mutex_lock(&t.mtx);
+    std::cout << "\nTABLERO INICIAL:\n";
+    
+    // TRONO
+    std::cout << "                        " << obtenerNombre(t.celdas[TRONO]) << "\n";
+    std::cout << "                       /  |  \\ \n";
+    std::cout << "                    /     |     \\ \n";
+    std::cout << "                 /        |        \\ \n";
+    
+    // FILA DEL TECHO NODOS 1 y 2
+    std::cout << "            " << obtenerNombre(t.celdas[TECHO_IZQ]) 
+              << "---------+---------" 
+              << obtenerNombre(t.celdas[TECHO_DER]) << "\n";
+    
+    // DIAGONALES
+    std::cout << "           /  |           |           |  \\ \n";
+    std::cout << "        /     |           |           |     \\ \n";
+    std::cout << "     /        |           |           |        \\ \n";
+    
+    // CUADRICULA 5x5
+    for (int f = 0; f < FILAS; f++) {
+        // Fila de Nodos
+        std::cout << obtenerNombre(t.celdas[nodo(f, 0)]) << "-------" 
+                  << obtenerNombre(t.celdas[nodo(f, 1)]) << "-------"
+                  << obtenerNombre(t.celdas[nodo(f, 2)]) << "-------"
+                  << obtenerNombre(t.celdas[nodo(f, 3)]) << "-------"
+                  << obtenerNombre(t.celdas[nodo(f, 4)]) << "\n";
+        
+        // FILAS DE CONEXIONES
+        if (f < FILAS - 1) {
+            std::cout << "  |           |           |           |           |\n";
+            std::cout << "  |           |           |           |           |\n";
+            std::cout << "  |           |           |           |           |\n";
+        }
+    }
+    pthread_mutex_unlock(&t.mtx);
+}
+
 #endif
