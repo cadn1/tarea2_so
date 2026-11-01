@@ -159,7 +159,7 @@ inline const char* obtenerNombre(Celda c) {
 
 inline void imprimirTablero(Tablero& t) {
     pthread_mutex_lock(&t.mtx);
-    std::cout << "\nTABLERO INICIAL:\n";
+    std::cout << "\nTABLERO:\n";
     
     // TRONO
     std::cout << "                        " << obtenerNombre(t.celdas[TRONO]) << "\n";
