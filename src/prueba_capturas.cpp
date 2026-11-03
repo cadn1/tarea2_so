@@ -20,6 +20,11 @@ int main() {
         if (desde >= 0 && desde < NODOS) t.celdas[desde] = origen;
         if (sobre >= 0 && sobre < NODOS) t.celdas[sobre] = intermedio;
         if (hacia >= 0 && hacia < NODOS) t.celdas[hacia] = destino;
+        for (int i = 0, id = 0; i < NODOS; ++i)
+            if (t.celdas[i] == PERRO) t.idPerro[i] = id++;
+        std::array<int, NODOS> idsEsperados;
+        for (int i = 0; i < NODOS; ++i) idsEsperados[i] = t.idPerro[i];
+        if (esperado) idsEsperados[sobre] = -1;
         t.capturados = 2;
         std::array<Celda, NODOS> esperadas;
         for (int i = 0; i < NODOS; ++i) esperadas[i] = t.celdas[i];
@@ -32,6 +37,7 @@ int main() {
         comprobar(capturarPerro(t, desde, sobre, hacia) == esperado, nombre + ": RETORNO INCORRECTO");
         comprobar(t.capturados == 2 + (esperado ? 1 : 0), nombre + ": CONTADOR INCORRECTO");
         for (int i = 0; i < NODOS; ++i) {
+            comprobar(t.idPerro[i] == idsEsperados[i], nombre + ": identidad incorrecta");
             comprobar(t.celdas[i] == esperadas[i],
                       nombre + ": CELDA INCORRECTA " + std::to_string(i));
         }

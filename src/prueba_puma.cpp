@@ -6,12 +6,13 @@ int main() {
     iniciarTablero(t);
     t.celdas[nodo(2, 2)] = PUMA;
     int posPerros[3] = {nodo(2, 3), nodo(3, 2), nodo(1, 1)};
-    ArgFicha puma{&t, nodo(2, 2), PUMA, 1, 50, 300};
+    ArgFicha puma{&t, nodo(2, 2), PUMA, 1, -1, 50, 300};
     ArgFicha perros[3];
     pthread_t th[4];
     for (int i = 0; i < 3; i++) {
         t.celdas[posPerros[i]] = PERRO;
-        perros[i] = ArgFicha{&t, posPerros[i], PERRO, (unsigned)(10 + i), 50, 300};
+        t.idPerro[posPerros[i]] = i;
+        perros[i] = ArgFicha{&t, posPerros[i], PERRO, (unsigned)(10 + i), i, 50, 300};
     }
     pthread_create(&th[0], nullptr, hiloPuma, &puma);
     for (int i = 0; i < 3; i++) pthread_create(&th[i + 1], nullptr, hiloPerro, &perros[i]);
