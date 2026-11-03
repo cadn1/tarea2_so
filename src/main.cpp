@@ -17,6 +17,7 @@ struct Torneo {
     pthread_cond_t cond;
     sem_t cupos;                          // cuenta las mesas libres (M)
     Config cfg;                           // parametros de las partidas
+    std::vector<bool> mesaOcupada;        // true = mesa en uso (protegido por mtx)
     const volatile sig_atomic_t* parar = nullptr; // Ctrl+C
 };
 
@@ -69,7 +70,15 @@ void* hiloJugador(void* p) {
             std::cout << "[PAREJA " << pareja + 1 << "] espera una mesa libre" << std::endl;
             if (!esperarMesa(&t.cupos, t.parar)) return nullptr;
         }
-        jugarPartida(t.cfg, pareja + 1, t.parar);
+        pthread_mutex_lock(&t.mtx);
+        int mesa = 0; // el semaforo garantiza que hay una libre
+        while (t.mesaOcupada[mesa]) mesa++;
+        t.mesaOcupada[mesa] = true;
+        pthread_mutex_unlock(&t.mtx);
+        jugarPartida(t.cfg, mesa + 1, t.parar);
+        pthread_mutex_lock(&t.mtx);
+        t.mesaOcupada[mesa] = false;
+        pthread_mutex_unlock(&t.mtx);
         sem_post(&t.cupos); // la mesa queda libre
     }
     return nullptr;
@@ -131,6 +140,7 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
         pthread_mutex_destroy(&torneo.mtx);
         return 1;
     }
+    torneo.mesaOcupada.assign(M < N / 2 + 1 ? M : N / 2 + 1, false);
     torneo.parar = &paraTodo;
     struct sigaction sa; // Ctrl+C sin SA_RESTART
     sa.sa_handler = manejador;

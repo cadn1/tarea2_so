@@ -6,6 +6,8 @@
 #include <iostream>
 #include <pthread.h>
 
+inline pthread_mutex_t mtxSalida = PTHREAD_MUTEX_INITIALIZER; // una mesa imprime a la vez
+
 enum Celda { VACIA, PUMA, PERRO }; // que hay en cada casilla
 enum Ganador { NADIE, GANA_PUMA, GANAN_PERROS }; // resultado de la partida
 
