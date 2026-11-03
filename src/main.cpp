@@ -37,9 +37,13 @@ void* hiloJugador(void* p) {
     const ArgJugador& a = *static_cast<ArgJugador*>(p);
     Torneo& t = *a.torneo;
     pthread_mutex_lock(&t.mtx);
+    pthread_mutex_lock(&mtxSalida);
     std::cout << "[JUGADOR " << a.id << "] llegada registrada.\n";
+    pthread_mutex_unlock(&mtxSalida);
     if (t.jugadores % 2 != 0 && a.id == t.jugadores) {
+        pthread_mutex_lock(&mtxSalida);
         std::cout << "[JUGADOR " << a.id << "] sin pareja.\n";
+        pthread_mutex_unlock(&mtxSalida);
         pthread_mutex_unlock(&t.mtx);
         return nullptr;
     }
@@ -48,15 +52,20 @@ void* hiloJugador(void* p) {
         ++t.parejas[pareja].llegadas;
         if (t.parejas[pareja].llegadas == 2) { // solo el segundo integrante anuncia
             const int primero = pareja * 2 + 1;
+            pthread_mutex_lock(&mtxSalida);
             std::cout << "[PAREJA " << pareja + 1 << "] EMPAREJADOS: JUGADOR "
                       << primero << " (PUMA) VS JUGADOR " << primero + 1 << " (PERROS)\n";
+            pthread_mutex_unlock(&mtxSalida);
             pthread_cond_broadcast(&t.cond);
         }
         while (!t.fallo && !t.parejas[pareja].terminada)
             pthread_cond_wait(&t.cond, &t.mtx);
-        if (t.parejas[pareja].terminada)
+        if (t.parejas[pareja].terminada) {
+            pthread_mutex_lock(&mtxSalida);
             std::cout << "[JUGADOR " << a.id << "] partida terminada. Resultado: "
                       << t.parejas[pareja].resultado << '\n';
+            pthread_mutex_unlock(&mtxSalida);
+        }
     }
     pthread_mutex_unlock(&t.mtx);
     return nullptr;
@@ -81,7 +90,9 @@ void* hiloMesa(void* p) {
             continue;
         }
         t.parejas[elegida].jugando = true;
+        pthread_mutex_lock(&mtxSalida);
         std::cout << "[MESA " << a.id << "] INICIO PAREJA " << elegida + 1 << '\n';
+        pthread_mutex_unlock(&mtxSalida);
         pthread_mutex_unlock(&t.mtx);
 
         const Ganador resultado = jugarPartida(cfg, a.id);
@@ -92,8 +103,10 @@ void* hiloMesa(void* p) {
         pareja.terminada = true;
         pareja.jugando = false;
         ++t.terminadas;
+        pthread_mutex_lock(&mtxSalida);
         std::cout << "[MESA " << a.id << "] LIBERADA. PAREJA " << elegida + 1
                   << " terminada. Resultado: " << resultado << '\n';
+        pthread_mutex_unlock(&mtxSalida);
         pthread_cond_broadcast(&t.cond);
     }
     pthread_mutex_unlock(&t.mtx);
@@ -102,7 +115,9 @@ void* hiloMesa(void* p) {
 
 int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS 
     if (argc < 3 || argc > 4) {
+        pthread_mutex_lock(&mtxSalida);
         std::cerr << "ERROR --> USO CORRECTO  --> " << argv[0] << " N M [config.txt]\n";
+        pthread_mutex_unlock(&mtxSalida);
         return 1;
     }
 
@@ -116,7 +131,9 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
         return resultado.ec == std::errc{} && resultado.ptr == fin && numero > 0;
     };
     if (!enteroPositivo(argv[1], N) || !enteroPositivo(argv[2], M)) {
+        pthread_mutex_lock(&mtxSalida);
         std::cerr << "ERROR: N y M deben ser enteros positivos dentro del rango de int, sin texto adicional.\n";
+        pthread_mutex_unlock(&mtxSalida);
         return 1;
     }
 
@@ -124,8 +141,12 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
         config_file = argv[3];
     }
 
+    pthread_mutex_lock(&mtxSalida);
     std::cout << "--- SERVIDOR INICIADO ---\n";
+    pthread_mutex_unlock(&mtxSalida);
+    pthread_mutex_lock(&mtxSalida);
     std::cout << "JUGADORES: " << N << " [-] MESAS DISPONIBLES: " << M << "\n";
+    pthread_mutex_unlock(&mtxSalida);
 
     Torneo torneo;
     torneo.jugadores = N;
@@ -141,17 +162,23 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
         argsMesas.resize(cantidadMesas);
         mesas.resize(cantidadMesas);
     } catch (const std::exception& e) {
+        pthread_mutex_lock(&mtxSalida);
         std::cerr << "ERROR: no se pudieron reservar los jugadores: " << e.what() << '\n';
+        pthread_mutex_unlock(&mtxSalida);
         return 1;
     }
     int error = pthread_mutex_init(&torneo.mtx, nullptr);
     if (error != 0) {
+        pthread_mutex_lock(&mtxSalida);
         std::cerr << "ERROR: pthread_mutex_init: " << std::strerror(error) << '\n';
+        pthread_mutex_unlock(&mtxSalida);
         return 1;
     }
     error = pthread_cond_init(&torneo.cond, nullptr);
     if (error != 0) {
+        pthread_mutex_lock(&mtxSalida);
         std::cerr << "ERROR: pthread_cond_init: " << std::strerror(error) << '\n';
+        pthread_mutex_unlock(&mtxSalida);
         pthread_mutex_destroy(&torneo.mtx);
         return 1;
     }
@@ -163,8 +190,10 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
         if (error != 0) {
             pthread_mutex_lock(&torneo.mtx);
             torneo.fallo = true;
+            pthread_mutex_lock(&mtxSalida);
             std::cerr << "ERROR: pthread_create de la mesa " << i + 1 << ": "
                       << std::strerror(error) << '\n';
+            pthread_mutex_unlock(&mtxSalida);
             pthread_cond_broadcast(&torneo.cond);
             pthread_mutex_unlock(&torneo.mtx);
             falloCreacion = true;
@@ -179,8 +208,10 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
         if (error != 0) {
             pthread_mutex_lock(&torneo.mtx);
             torneo.fallo = true;
+            pthread_mutex_lock(&mtxSalida);
             std::cerr << "ERROR: pthread_create del jugador " << i + 1 << ": "
                       << std::strerror(error) << '\n';
+            pthread_mutex_unlock(&mtxSalida);
             pthread_cond_broadcast(&torneo.cond);
             pthread_mutex_unlock(&torneo.mtx);
             break;
@@ -191,16 +222,20 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
     for (int i = 0; i < creados; ++i) {
         error = pthread_join(hilos[i], nullptr);
         if (error != 0) {
+            pthread_mutex_lock(&mtxSalida);
             std::cerr << "ERROR: pthread_join del jugador " << i + 1 << ": "
                       << std::strerror(error) << '\n';
+            pthread_mutex_unlock(&mtxSalida);
             falloJoin = true;
         }
     }
     for (int i = 0; i < mesasCreadas; ++i) {
         error = pthread_join(mesas[i], nullptr);
         if (error != 0) {
+            pthread_mutex_lock(&mtxSalida);
             std::cerr << "ERROR: pthread_join de la mesa " << i + 1 << ": "
                       << std::strerror(error) << '\n';
+            pthread_mutex_unlock(&mtxSalida);
             falloJoin = true;
         }
     }
