@@ -10,7 +10,7 @@ struct Estado {
     bool fin;
 };
 
-// Las instantaneas se toman sin hilos activos o despues de pthread_join().
+// SIN HILOS ACTIVOS O DESPUES DE PHTREAD_JOIN
 Estado guardar(const Tablero& t) {
     Estado e;
     for (int i = 0; i < NODOS; ++i) {
@@ -48,7 +48,7 @@ struct Intentos {
 
 void* intentarDespues(void* p) {
     auto& a = *static_cast<Intentos*>(p);
-    // Reproducir la consulta previa que no autoriza una accion posterior al fin.
+    // NINGUN HILO PUEDE MOVER O CAPTURAR FICHAS DSP DE QUE TERMINE LA PARTIDA
     a.vioActiva = !partidaTerminada(*a.t);
     pthread_mutex_lock(&a.mtx);
     a.preparado = true;
@@ -72,32 +72,32 @@ int main() {
     {
         Tablero t;
         preparar(t);
-        comprobar(moverFicha(t, 13, 8, PUMA, -1), "puma puede moverse en partida activa");
-        comprobar(moverFicha(t, 8, 13, PUMA, -1), "puma puede regresar");
-        comprobar(moverFicha(t, 14, 9, PERRO, 0), "perro puede moverse en partida activa");
-        comprobar(moverFicha(t, 9, 14, PERRO, 0), "perro puede regresar con su identidad");
+        comprobar(moverFicha(t, 13, 8, PUMA, -1), "PUMA PUEDE MOVERSE EN PARTIDA ACTIVA");
+        comprobar(moverFicha(t, 8, 13, PUMA, -1), "PUMA PUEDE REGRESAR");
+        comprobar(moverFicha(t, 14, 9, PERRO, 0), "PERRO PUEDE MOVERSE EN PARTIDA ACTIVA");
+        comprobar(moverFicha(t, 9, 14, PERRO, 0), "PERRO PUEDE REGRESAR CON SU IDENTIDAD");
         comprobar(capturarPerro(t, 13, 14, 15) && t.capturados == 3 &&
                   t.celdas[15] == PUMA && t.celdas[14] == VACIA && t.idPerro[14] == -1,
-                  "captura legal permitida en partida activa");
+                  "CAPTURA LEGAL PERMITIDA");
         destruirTablero(t);
     }
     {
         Tablero t;
         preparar(t);
         terminarPartida(t);
-        comprobar(partidaTerminada(t), "partida marcada como finalizada");
+        comprobar(partidaTerminada(t), "PARTIDA FINALIZADA");
         const Estado e = guardar(t);
         comprobar(!moverFicha(t, 13, 8, PUMA, -1) && igual(t, e),
-                  "rechazo del puma conserva todo el estado");
+                  "PUMA NO PUEDE MOVERSE ( PARRIDA TERMINO)");
         comprobar(!moverFicha(t, 14, 9, PERRO, 0) && igual(t, e),
-                  "rechazo del perro conserva todo el estado");
+                  "PERRO NO PUEDE MOVERSE ( PARTIDA TERMINO)");
         comprobar(!capturarPerro(t, 13, 14, 15) && igual(t, e),
-                  "rechazo de captura legal conserva todo el estado");
+                  "PUMA NO PUEDE CAPTURAR");
         destruirTablero(t);
     }
     {
         Tablero t;
-        preparar(t);
+        preparar(t); // SI UN HILO TERMINA LA PARTIDA OTRO HILO NO PUEDE MOVER LAS FICHAS
         Intentos a{&t};
         pthread_t th;
         if (pthread_create(&th, nullptr, intentarDespues, &a) != 0) {
@@ -111,7 +111,7 @@ int main() {
         pthread_cond_broadcast(&a.cond);
         pthread_mutex_unlock(&a.mtx);
         if (pthread_join(th, nullptr) != 0) std::exit(EXIT_FAILURE);
-        comprobar(a.vioActiva && a.rechazados, "consulta previa activa no permite 300 acciones posteriores al fin");
+        comprobar(a.vioActiva && a.rechazados, "COMPROBAR 300 INTENTOS");
         Estado esperado;
         esperado.celdas.fill(VACIA);
         esperado.ids.fill(-1);
@@ -120,7 +120,7 @@ int main() {
         esperado.ids[14] = 0;
         esperado.capturados = 2;
         esperado.fin = true;
-        comprobar(igual(t, esperado), "intentos concurrentes posteriores al fin conservan todo el estado");
+        comprobar(igual(t, esperado), "TABLERO IGUAL AL ESPERADO");
         pthread_cond_destroy(&a.cond);
         pthread_mutex_destroy(&a.mtx);
         destruirTablero(t);
@@ -132,19 +132,19 @@ int main() {
         t.celdas[16] = PERRO; t.idPerro[16] = 1;
         t.celdas[19] = PERRO; t.idPerro[19] = 2;
         comprobar(capturarPerro(t, 13, 14, 15) && partidaTerminada(t) && t.capturados == 6,
-                  "sexta captura aceptada y cierre inmediato sin juez");
-        comprobar(ganador(t) == GANA_PUMA, "ganador informa puma despues del cierre");
+                  "SEXTA CAPTURA -> SE TERMINA LA PARTIDA SIN JUEZ");
+        comprobar(ganador(t) == GANA_PUMA, "GANADOR -> DEBE DECIR PUMA");
         const Estado e = guardar(t);
         comprobar(!moverFicha(t, 15, 10, PUMA, -1) && igual(t, e),
-                  "puma no se mueve despues de sexta captura");
+                  "PUMA NO SE MUEVE DSP DE LA SEXTA CAPTURA");
         comprobar(!moverFicha(t, 19, 14, PERRO, 2) && igual(t, e),
-                  "perro no se mueve despues de sexta captura");
+                  "PERRO NO SE MUEVE DSP DE LA SEXTA CAPTURA");
         comprobar(!capturarPerro(t, 15, 16, 17) && igual(t, e),
-                  "no se acepta una septima captura aunque su geometria sea legal");
+                  "NO SE ACEPTA UNA SEPTIMA CAPTURA");
         destruirTablero(t);
     }
     {
-        Tablero t;
+        Tablero t; // PERROS BLOQUEAN AL PUMA
         iniciarTablero(t);
         t.celdas[TRONO] = PUMA;
         const int perros[] = {1, 2, 5, 3, 7, 11};
@@ -153,18 +153,18 @@ int main() {
             t.idPerro[perros[id]] = id;
         }
         comprobar(ganador(t) == NADIE && !partidaTerminada(t),
-                  "antes del bloqueo el puma puede capturar hacia 10");
+                  "ANTES DEL BLOQUEO TODAVIA NO HAY GANADOR");
         comprobar(moverFicha(t, 11, 10, PERRO, 5) && partidaTerminada(t),
-                  "movimiento que bloquea al puma aceptado y cierre inmediato");
-        comprobar(ganador(t) == GANAN_PERROS, "ganador informa perros despues del bloqueo");
+                  "PUMA BLOQUEADO SE CIERRA LA PARTIDA");
+        comprobar(ganador(t) == GANAN_PERROS, "GANADOR DEBE SER PERROS");
         const Estado e = guardar(t);
         comprobar(!moverFicha(t, 3, 8, PERRO, 3) && igual(t, e),
-                  "perro no puede deshacer el bloqueo ganador");
+                  "PERRO NO PUEDE MOVERSE YA QUE LA PARTIDA TERMINO");
         comprobar(!moverFicha(t, 0, 1, PUMA, -1) && !capturarPerro(t, 0, 1, 3) && igual(t, e),
-                  "puma no actua despues del bloqueo");
+                  "PUMA NO PUEDE MOVERSE YA QUE LA PARTIDA TERMINO");
         destruirTablero(t);
     }
-    // Estados ganadores preparados antes de actuar: ambas operaciones deben cerrarlos.
+    // LA PARTIDA TERMINO PERO FIN == FALSE
     for (bool captura : {false, true}) {
         Tablero t;
         preparar(t);
@@ -174,7 +174,7 @@ int main() {
         const bool ok = captura ? capturarPerro(t, 13, 14, 15)
                                 : moverFicha(t, 13, 8, PUMA, -1);
         comprobar(!ok && igual(t, e) && ganador(t) == GANA_PUMA,
-                  "estado ganador previo se cierra sin ejecutar la accion");
+                  "PUMA YA GANO");
         destruirTablero(t);
     }
     {
@@ -189,9 +189,9 @@ int main() {
         Estado e = guardar(t);
         e.fin = true;
         comprobar(!moverFicha(t, 3, 8, PERRO, 3) && igual(t, e) && ganador(t) == GANAN_PERROS,
-                  "bloqueo previo se cierra sin permitir liberar al puma");
+                  "PERROS YA GANARON PUMA NO PUEDE NI DEBERIA MOVERSE");
         destruirTablero(t);
     }
-    std::cout << "Resultado: " << errores << " fallos.\n";
+    std::cout << "RESULTADO: " << errores << " FALLOS.\n";
     return errores == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
