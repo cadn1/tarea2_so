@@ -8,6 +8,9 @@
 #include <csignal>
 #include "tablero.hpp"
 
+// C++17: una sola instancia compartida por todas las mesas y unidades de traduccion.
+inline pthread_mutex_t mtxSalida = PTHREAD_MUTEX_INITIALIZER;
+
 struct ArgFicha { // datos que recibe cada hilo de ficha
     Tablero* t;
     int pos;          // casilla actual de esta ficha
@@ -108,13 +111,16 @@ inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_at
         if (parar && *parar) break; // llego Ctrl+C
         g = ganador(t);
         if (ciclos % cadaCiclos == 0) { // log del estado
+            pthread_mutex_lock(&mtxSalida); // salida antes del mutex interno del tablero
             std::cout << "[MESA " << idMesa << "] estado:";
             imprimirTablero(t);
+            pthread_mutex_unlock(&mtxSalida);
         }
     }
 
     terminarPartida(t); // avisa a todos los hilos que paren
     for (int i = 0; i < creados; i++) pthread_join(th[i], nullptr);
+    pthread_mutex_lock(&mtxSalida);
     std::cout << "[MESA " << idMesa << "] tablero final:";
     imprimirTablero(t);
     int vivos = 0;
@@ -124,6 +130,7 @@ inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_at
               << (g == GANA_PUMA ? "PUMA" : (g == GANAN_PERROS ? "PERROS" : "NADIE"))
               << " | vivos: " << vivos << " | capturados: " << t.capturados
               << " | total: " << vivos + t.capturados << std::endl;
+    pthread_mutex_unlock(&mtxSalida);
     destruirTablero(t);
     return g;
 }
