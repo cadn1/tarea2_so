@@ -4,10 +4,19 @@
 #include <pthread.h>
 #include <string>
 #include <vector>
+#include "mesa.hpp"
+
+struct Pareja {
+    int llegadas = 0;
+    bool jugando = false;
+    bool terminada = false;
+    Ganador resultado = NADIE;
+};
 
 struct Torneo {
     int jugadores;
-    std::vector<int> llegadas; // cantidad de integrantes presentes por pareja
+    std::vector<Pareja> parejas;
+    std::size_t terminadas = 0;
     bool fallo = false;
     pthread_mutex_t mtx;
     pthread_cond_t cond;
@@ -30,15 +39,55 @@ void* hiloJugador(void* p) {
     }
     const int pareja = (a.id - 1) / 2;
     if (!t.fallo) {
-        ++t.llegadas[pareja];
-        if (t.llegadas[pareja] == 2) { // solo el segundo integrante anuncia
+        ++t.parejas[pareja].llegadas;
+        if (t.parejas[pareja].llegadas == 2) { // solo el segundo integrante anuncia
             const int primero = pareja * 2 + 1;
             std::cout << "[PAREJA " << pareja + 1 << "] EMPAREJADOS: JUGADOR "
                       << primero << " (PUMA) VS JUGADOR " << primero + 1 << " (PERROS)\n";
             pthread_cond_broadcast(&t.cond);
         }
-        while (!t.fallo && t.llegadas[pareja] < 2)
+        while (!t.fallo && !t.parejas[pareja].terminada)
             pthread_cond_wait(&t.cond, &t.mtx);
+        if (t.parejas[pareja].terminada)
+            std::cout << "[JUGADOR " << a.id << "] partida terminada. Resultado: "
+                      << t.parejas[pareja].resultado << '\n';
+    }
+    pthread_mutex_unlock(&t.mtx);
+    return nullptr;
+}
+
+void* hiloMesa(void* p) {
+    Torneo& t = *static_cast<Torneo*>(p);
+    const Config cfg; // configuracion predeterminada; una partida por vez
+    pthread_mutex_lock(&t.mtx);
+    while (!t.fallo && t.terminadas < t.parejas.size()) {
+        int elegida = -1;
+        for (std::size_t i = 0; i < t.parejas.size(); ++i) {
+            const Pareja& pareja = t.parejas[i];
+            if (pareja.llegadas == 2 && !pareja.jugando && !pareja.terminada) {
+                elegida = static_cast<int>(i);
+                break;
+            }
+        }
+        if (elegida < 0) {
+            pthread_cond_wait(&t.cond, &t.mtx);
+            continue;
+        }
+        t.parejas[elegida].jugando = true;
+        std::cout << "[MESA 1] INICIO PAREJA " << elegida + 1 << '\n';
+        pthread_mutex_unlock(&t.mtx);
+
+        const Ganador resultado = jugarPartida(cfg, 1);
+
+        pthread_mutex_lock(&t.mtx);
+        Pareja& pareja = t.parejas[elegida];
+        pareja.resultado = resultado;
+        pareja.terminada = true;
+        pareja.jugando = false;
+        ++t.terminadas;
+        std::cout << "[MESA 1] LIBERADA. PAREJA " << elegida + 1
+                  << " terminada. Resultado: " << resultado << '\n';
+        pthread_cond_broadcast(&t.cond);
     }
     pthread_mutex_unlock(&t.mtx);
     return nullptr;
@@ -76,7 +125,7 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
     std::vector<ArgJugador> args;
     std::vector<pthread_t> hilos;
     try { // RESERVAR ANTES DE CREAR HILOS MANTIENE ESTABLES SUS ARGUMENTOS
-        torneo.llegadas.resize(N / 2, 0);
+        torneo.parejas.resize(N / 2);
         args.resize(N);
         hilos.resize(N);
     } catch (const std::exception& e) {
@@ -91,6 +140,14 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
     error = pthread_cond_init(&torneo.cond, nullptr);
     if (error != 0) {
         std::cerr << "ERROR: pthread_cond_init: " << std::strerror(error) << '\n';
+        pthread_mutex_destroy(&torneo.mtx);
+        return 1;
+    }
+    pthread_t mesa;
+    error = pthread_create(&mesa, nullptr, hiloMesa, &torneo);
+    if (error != 0) {
+        std::cerr << "ERROR: pthread_create de la mesa: " << std::strerror(error) << '\n';
+        pthread_cond_destroy(&torneo.cond);
         pthread_mutex_destroy(&torneo.mtx);
         return 1;
     }
@@ -117,6 +174,11 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
                       << std::strerror(error) << '\n';
             falloJoin = true;
         }
+    }
+    error = pthread_join(mesa, nullptr);
+    if (error != 0) {
+        std::cerr << "ERROR: pthread_join de la mesa: " << std::strerror(error) << '\n';
+        falloJoin = true;
     }
     if (falloJoin) return 1; // no destruir primitivas si no se confirmo la salida de todos
     pthread_cond_destroy(&torneo.cond);
