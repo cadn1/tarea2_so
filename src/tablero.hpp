@@ -76,15 +76,23 @@ inline bool moverFicha(Tablero& t, int desde, int hacia, Celda tipo) { // intent
 }
 
 
+inline std::vector<std::array<int,3>> todosLosSaltos();
+
 inline bool capturarPerro(Tablero& t, int desde, int sobre, int hacia) { // salto del puma, true si captura
     pthread_mutex_lock(&t.mtx);
     bool ok = false;
-    if (t.celdas[desde] == PUMA && t.celdas[sobre] == PERRO && t.celdas[hacia] == VACIA) {
-        t.celdas[desde] = VACIA;  // el puma sale de su casilla
-        t.celdas[sobre] = VACIA;  // el perro desaparece
-        t.celdas[hacia] = PUMA;   // el puma cae al otro lado
-        t.capturados++;
-        ok = true;
+    if (desde >= 0 && desde < NODOS && sobre >= 0 && sobre < NODOS && hacia >= 0 && hacia < NODOS) {
+        for (const auto& s : todosLosSaltos()) {
+            if (s[0] == desde && s[1] == sobre && s[2] == hacia &&
+                t.celdas[desde] == PUMA && t.celdas[sobre] == PERRO && t.celdas[hacia] == VACIA) {
+                t.celdas[desde] = VACIA;  // el puma sale de su casilla
+                t.celdas[sobre] = VACIA;  // el perro desaparece
+                t.celdas[hacia] = PUMA;   // el puma cae al otro lado
+                t.capturados++;
+                ok = true;
+                break;
+            }
+        }
     }
     pthread_mutex_unlock(&t.mtx);
     return ok;
@@ -100,7 +108,7 @@ inline int saltoCuadricula(int desde, int sobre) { // nodo de aterrizaje en line
 }
 
 
-const bool SALTOS_TECHO = false; // saltos que cruzan el techo
+const bool SALTOS_TECHO = true; // habilita las diez trayectorias dirigidas confirmadas del enunciado
 
 inline std::vector<std::array<int,3>> todosLosSaltos() { // triples (desde, sobre, hacia) en linea recta
     std::vector<std::array<int,3>> s;
