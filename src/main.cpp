@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "mesa.hpp"
+#include "config.hpp"
 
 struct Pareja {
     int llegadas = 0;
@@ -16,6 +17,7 @@ struct Pareja {
 
 struct Torneo {
     int jugadores;
+    const Config* config; // vive en main hasta esperar todos los trabajadores
     std::vector<Pareja> parejas;
     std::size_t terminadas = 0;
     bool fallo = false;
@@ -62,7 +64,7 @@ void* hiloJugador(void* p) {
             pthread_cond_wait(&t.cond, &t.mtx);
         if (t.parejas[pareja].terminada) {
             pthread_mutex_lock(&mtxSalida);
-            std::cout << "[JUGADOR " << a.id << "] partida terminada. Resultado: "
+            std::cout << "[JUGADOR " << a.id << "] PARTIDA FINALIZADA [+] RESULTADO: "
                       << t.parejas[pareja].resultado << '\n';
             pthread_mutex_unlock(&mtxSalida);
         }
@@ -74,7 +76,7 @@ void* hiloJugador(void* p) {
 void* hiloMesa(void* p) {
     const ArgMesa& a = *static_cast<ArgMesa*>(p);
     Torneo& t = *a.torneo;
-    const Config cfg; // configuracion predeterminada; una partida por vez
+    const Config& cfg = *t.config; // compartida como solo lectura
     pthread_mutex_lock(&t.mtx);
     while (!t.fallo && t.terminadas < t.parejas.size()) {
         int elegida = -1;
@@ -140,6 +142,16 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
     if (argc == 4) {
         config_file = argv[3];
     }
+    Config cfg;
+    if (argc == 4) {
+        std::string errorConfig;
+        if (!leerConfig(config_file, cfg, errorConfig)) {
+            pthread_mutex_lock(&mtxSalida);
+            std::cerr << "ERROR: " << errorConfig << '\n';
+            pthread_mutex_unlock(&mtxSalida);
+            return 1;
+        }
+    }
 
     pthread_mutex_lock(&mtxSalida);
     std::cout << "--- SERVIDOR INICIADO ---\n";
@@ -150,6 +162,7 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
 
     Torneo torneo;
     torneo.jugadores = N;
+    torneo.config = &cfg;
     const int cantidadMesas = std::min(M, N / 2);
     std::vector<ArgJugador> args;
     std::vector<pthread_t> hilos;

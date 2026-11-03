@@ -62,32 +62,34 @@ struct Config { // parametros de la partida, los llenara el parseo del config.tx
     unsigned semilla = 1;  // para repetir una partida
     int maxSegundos = 60;  // tope de duracion, evita partidas eternas
     int logCadaMs = 2000;  // cada cuanto se imprime el tablero
+    int puma = TRONO;
+    // El indice en este arreglo es el ID: conserva el orden de colocacion actual.
+    std::array<int, 12> perros{{13, 17, 18, 23, 19, 24, 20, 25, 21, 26, 22, 27}};
 };
 
-inline void colocarFichasIniciales(Tablero& t) { // posicion por defecto, el config puede cambiarla
-    int id = 0;
-    t.celdas[TRONO] = PUMA;
-    t.celdas[nodo(2, 0)] = PERRO;
-    t.idPerro[nodo(2, 0)] = id++;
-    t.celdas[nodo(2, 4)] = PERRO;
-    t.idPerro[nodo(2, 4)] = id++;
-    for (int c = 0; c < COLS; c++) {
-        t.celdas[nodo(3, c)] = PERRO;
-        t.idPerro[nodo(3, c)] = id++;
-        t.celdas[nodo(4, c)] = PERRO;
-        t.idPerro[nodo(4, c)] = id++;
+inline void colocarFichasIniciales(Tablero& t, const Config& cfg = Config{}) {
+    t.celdas[cfg.puma] = PUMA;
+    for (std::size_t id = 0; id < cfg.perros.size(); ++id) {
+        t.celdas[cfg.perros[id]] = PERRO;
+        t.idPerro[cfg.perros[id]] = static_cast<int>(id);
     }
 }
 
 inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_atomic_t* parar = nullptr) { // quien la llama hace de Juez
     Tablero t;
     iniciarTablero(t);
-    colocarFichasIniciales(t);
+    colocarFichasIniciales(t, cfg);
+    pthread_mutex_lock(&mtxSalida);
+    std::cout << "[MESA " << idMesa << "] tablero inicial:";
+    imprimirTablero(t);
+    pthread_mutex_unlock(&mtxSalida);
+    Ganador g = ganador(t);
+    if (g != NADIE) terminarPartida(t); // victoria inicial, antes de crear fichas
 
     ArgFicha args[13]; // 0 = puma, 1 a 12 = perros
     pthread_t th[13];
     int k = 0;         // cuantos perros hay
-    args[0] = ArgFicha{&t, TRONO, PUMA, cfg.semilla, -1, cfg.minMs, cfg.maxMs};
+    args[0] = ArgFicha{&t, cfg.puma, PUMA, cfg.semilla, -1, cfg.minMs, cfg.maxMs};
     for (int i = 0; i < NODOS; i++) {
         if (t.celdas[i] != PERRO) continue;
         k++;
@@ -96,14 +98,13 @@ inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_at
 
     int creados = 0;
     bool fallo = false;
-    for (int i = 0; i <= k && !fallo; i++) { // un hilo por ficha
+    for (int i = 0; i <= k && !fallo && g == NADIE; i++) { // un hilo por ficha en partida activa
         void* (*f)(void*) = (i == 0) ? hiloPuma : hiloPerro;
         if (pthread_create(&th[i], nullptr, f, &args[i]) != 0) fallo = true;
         else creados++;
     }
 
     int cadaCiclos = (cfg.logCadaMs >= 100) ? cfg.logCadaMs / 100 : 1; // el juez revisa cada 100 ms
-    Ganador g = NADIE;
     int ciclos = 0;
     while (!fallo && g == NADIE && ciclos < cfg.maxSegundos * 10) {
         usleep(100 * 1000);
