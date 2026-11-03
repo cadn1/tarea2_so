@@ -7,6 +7,7 @@
 #include <pthread.h>
 
 enum Celda { VACIA, PUMA, PERRO }; // que hay en cada casilla
+enum Ganador { NADIE, GANA_PUMA, GANAN_PERROS }; // resultado de la partida
 
 const int FILAS = 5; // cuadricula principal
 const int COLS = 5;
@@ -60,10 +61,17 @@ inline void destruirTablero(Tablero& t) { // libera el mutex al cerrar la mesa
 }
 
 
+inline Ganador ganadorBajoMutex(const Tablero& t); // el que llama ya tiene el mutex
+
 inline bool moverFicha(Tablero& t, int desde, int hacia, Celda tipo, int idPerro) { // intenta mover, true si lo logro
     pthread_mutex_lock(&t.mtx);
+    if (t.fin || ganadorBajoMutex(t) != NADIE) {
+        t.fin = true;
+        pthread_mutex_unlock(&t.mtx);
+        return false;
+    }
     bool ok = false;
-    if (desde >= 0 && desde < NODOS && hacia >= 0 && hacia < NODOS &&
+    if (!t.fin && desde >= 0 && desde < NODOS && hacia >= 0 && hacia < NODOS &&
         (tipo == PUMA || (tipo == PERRO && idPerro >= 0 && idPerro < 12 && t.idPerro[desde] == idPerro)) &&
         t.celdas[desde] == tipo && t.celdas[hacia] == VACIA) { // sigo en mi casilla y el destino esta libre
         for (int v : t.ady[desde]) {
@@ -77,6 +85,7 @@ inline bool moverFicha(Tablero& t, int desde, int hacia, Celda tipo, int idPerro
             }
         }
     }
+    if (ok && ganadorBajoMutex(t) != NADIE) t.fin = true;
     pthread_mutex_unlock(&t.mtx);
     return ok;
 }
@@ -94,8 +103,13 @@ inline std::vector<std::array<int,3>> todosLosSaltos();
 
 inline bool capturarPerro(Tablero& t, int desde, int sobre, int hacia) { // salto del puma, true si captura
     pthread_mutex_lock(&t.mtx);
+    if (t.fin || ganadorBajoMutex(t) != NADIE) {
+        t.fin = true;
+        pthread_mutex_unlock(&t.mtx);
+        return false;
+    }
     bool ok = false;
-    if (desde >= 0 && desde < NODOS && sobre >= 0 && sobre < NODOS && hacia >= 0 && hacia < NODOS) {
+    if (!t.fin && desde >= 0 && desde < NODOS && sobre >= 0 && sobre < NODOS && hacia >= 0 && hacia < NODOS) {
         for (const auto& s : todosLosSaltos()) {
             if (s[0] == desde && s[1] == sobre && s[2] == hacia &&
                 t.celdas[desde] == PUMA && t.celdas[sobre] == PERRO && t.celdas[hacia] == VACIA) {
@@ -109,6 +123,7 @@ inline bool capturarPerro(Tablero& t, int desde, int sobre, int hacia) { // salt
             }
         }
     }
+    if (ok && ganadorBajoMutex(t) != NADIE) t.fin = true;
     pthread_mutex_unlock(&t.mtx);
     return ok;
 }
@@ -151,8 +166,6 @@ inline std::vector<std::array<int,3>> todosLosSaltos() { // triples (desde, sobr
     return s;
 }
 
-enum Ganador { NADIE, GANA_PUMA, GANAN_PERROS }; // resultado de la partida
-
 inline bool pumaSinMovimientos(const Tablero& t) { // el que llama ya tiene el mutex
     int p = -1;
     for (int i = 0; i < NODOS; i++)
@@ -165,11 +178,15 @@ inline bool pumaSinMovimientos(const Tablero& t) { // el que llama ya tiene el m
     return true;
 }
 
+inline Ganador ganadorBajoMutex(const Tablero& t) { // no adquiere el mutex
+    if (t.capturados >= 6) return GANA_PUMA;
+    if (pumaSinMovimientos(t)) return GANAN_PERROS;
+    return NADIE;
+}
+
 inline Ganador ganador(Tablero& t) { // revisa la victoria bajo el candado
     pthread_mutex_lock(&t.mtx);
-    Ganador g = NADIE;
-    if (t.capturados >= 6) g = GANA_PUMA;
-    else if (pumaSinMovimientos(t)) g = GANAN_PERROS;
+    Ganador g = ganadorBajoMutex(t);
     pthread_mutex_unlock(&t.mtx);
     return g;
 }

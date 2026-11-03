@@ -115,9 +115,15 @@ inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_at
 
     terminarPartida(t); // avisa a todos los hilos que paren
     for (int i = 0; i < creados; i++) pthread_join(th[i], nullptr);
+    std::cout << "[MESA " << idMesa << "] tablero final:";
+    imprimirTablero(t);
+    int vivos = 0;
+    for (int i = 0; i < NODOS; i++)
+        if (t.celdas[i] == PERRO) vivos++;
     std::cout << "[MESA " << idMesa << "] fin. Ganador: "
               << (g == GANA_PUMA ? "PUMA" : (g == GANAN_PERROS ? "PERROS" : "NADIE"))
-              << " | capturados: " << t.capturados << std::endl;
+              << " | vivos: " << vivos << " | capturados: " << t.capturados
+              << " | total: " << vivos + t.capturados << std::endl;
     destruirTablero(t);
     return g;
 }
