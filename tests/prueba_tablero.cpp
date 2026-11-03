@@ -7,6 +7,8 @@ int main() {
     int errores = 0;
     int casos = 0;
     auto comprobar = [&](Tablero& t, Ganador esperado, const std::string& nombre) {
+        for (int i = 0, id = 0; i < NODOS; ++i)
+            t.idPerro[i] = (t.celdas[i] == PERRO) ? id++ : -1;
         const Ganador obtenido = ganador(t);
         ++casos;
         if (obtenido != esperado) {
