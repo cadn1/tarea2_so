@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <pthread.h>
 #include <string>
@@ -15,6 +16,8 @@ struct Pareja {
     bool jugando = false;
     bool terminada = false;
     Ganador resultado = NADIE;
+    CierrePartida cierre = CIERRE_TIEMPO;
+    Celda abandona = VACIA; // protegido por Torneo::mtx
 };
 
 struct Torneo {
@@ -27,6 +30,8 @@ struct Torneo {
     bool sigintRecibido = false;
     bool cerrarReceptor = false;
     bool receptorTerminado = false;
+    int jugadorSimulado = 0; // 0 desactiva la demostracion
+    bool simularFallo = false;
     pthread_mutex_t mtx;
     pthread_cond_t cond;
 };
@@ -91,6 +96,31 @@ int restaurarMascara(const sigset_t& anterior) {
     return pthread_sigmask(SIG_SETMASK, &anterior, nullptr);
 }
 
+// El propio jugador llama esto ante una renuncia o un error local recuperable.
+// No llamar con t.mtx adquirido. Nunca cambia la parada global del torneo.
+bool notificarAbandono(Torneo& t, int id, bool falloControlado = false) {
+    if (id <= 0 || id > t.jugadores) return false;
+    pthread_mutex_lock(&t.mtx);
+    const int indice = (id - 1) / 2;
+    bool aceptado = false;
+    if (indice < static_cast<int>(t.parejas.size()) &&
+        !t.detener && !t.fallo) {
+        Pareja& pareja = t.parejas[indice];
+        if (pareja.jugando && !pareja.terminada && pareja.abandona == VACIA) {
+            pareja.abandona = id % 2 ? PUMA : PERRO;
+            aceptado = true;
+            pthread_mutex_lock(&mtxSalida);
+            std::cout << "[JUGADOR " << id << "] notifica abandono"
+                      << (falloControlado ? " por fallo controlado" : " voluntario")
+                      << ". PAREJA " << indice + 1 << '\n';
+            pthread_mutex_unlock(&mtxSalida);
+            pthread_cond_broadcast(&t.cond);
+        }
+    }
+    pthread_mutex_unlock(&t.mtx);
+    return aceptado;
+}
+
 void* hiloJugador(void* p) {
     const ArgJugador& a = *static_cast<ArgJugador*>(p);
     Torneo& t = *a.torneo;
@@ -116,12 +146,33 @@ void* hiloJugador(void* p) {
             pthread_mutex_unlock(&mtxSalida);
             pthread_cond_broadcast(&t.cond);
         }
+        // La demostracion ocurre desde el jugador, una vez asignada su mesa.
+        if (a.id == t.jugadorSimulado) {
+            while (!t.detener && !t.fallo && !t.parejas[pareja].terminada &&
+                   !t.parejas[pareja].jugando)
+                pthread_cond_wait(&t.cond, &t.mtx);
+            timespec limite{};
+            clock_gettime(CLOCK_REALTIME, &limite);
+            limite.tv_nsec += 200000000; // 200 ms de partida, sin bloquear otras mesas
+            if (limite.tv_nsec >= 1000000000) {
+                ++limite.tv_sec;
+                limite.tv_nsec -= 1000000000;
+            }
+            int espera = 0;
+            while (!t.detener && !t.fallo && !t.parejas[pareja].terminada && espera == 0)
+                espera = pthread_cond_timedwait(&t.cond, &t.mtx, &limite);
+            const bool notificar = !t.detener && !t.fallo && !t.parejas[pareja].terminada;
+            pthread_mutex_unlock(&t.mtx);
+            if (notificar) notificarAbandono(t, a.id, t.simularFallo || espera != ETIMEDOUT);
+            pthread_mutex_lock(&t.mtx);
+        }
         while (!t.detener && !t.fallo && !t.parejas[pareja].terminada)
             pthread_cond_wait(&t.cond, &t.mtx);
         if (t.parejas[pareja].terminada) {
             pthread_mutex_lock(&mtxSalida);
             std::cout << "[JUGADOR " << a.id << "] PARTIDA FINALIZADA [+] RESULTADO: "
-                      << t.parejas[pareja].resultado << '\n';
+                      << t.parejas[pareja].resultado << " | cierre: "
+                      << nombreCierre(t.parejas[pareja].cierre) << '\n';
             pthread_mutex_unlock(&mtxSalida);
         }
     }
@@ -154,22 +205,27 @@ void* hiloMesa(void* p) {
             continue;
         }
         t.parejas[elegida].jugando = true;
+        pthread_cond_broadcast(&t.cond);
         pthread_mutex_lock(&mtxSalida);
         std::cout << "[MESA " << a.id << "] INICIO PAREJA " << elegida + 1 << '\n';
         pthread_mutex_unlock(&mtxSalida);
         pthread_mutex_unlock(&t.mtx);
 
-        const Ganador resultado = jugarPartida(cfg, a.id, &control);
+        const ControlAbandono abandono{&t.mtx, &t.parejas[elegida].abandona};
+        CierrePartida cierre;
+        const Ganador resultado = jugarPartida(cfg, a.id, &control, &abandono, &cierre);
 
         pthread_mutex_lock(&t.mtx);
         Pareja& pareja = t.parejas[elegida];
         pareja.resultado = resultado;
+        pareja.cierre = cierre;
         pareja.terminada = true;
         pareja.jugando = false;
         ++t.terminadas;
         pthread_mutex_lock(&mtxSalida);
         std::cout << "[MESA " << a.id << "] LIBERADA. PAREJA " << elegida + 1
-                  << " terminada. Resultado: " << resultado << '\n';
+                  << " terminada. Resultado: " << resultado << " | cierre: "
+                  << nombreCierre(cierre) << '\n';
         pthread_mutex_unlock(&mtxSalida);
         pthread_cond_broadcast(&t.cond);
     }
@@ -225,6 +281,16 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
     Torneo torneo;
     torneo.jugadores = N;
     torneo.config = &cfg;
+    const char* abandonoSimulado = std::getenv("KOMIKAN_ABANDONA");
+    const char* falloSimulado = std::getenv("KOMIKAN_FALLO_JUGADOR");
+    const char* simulacion = abandonoSimulado ? abandonoSimulado : falloSimulado;
+    if ((abandonoSimulado && falloSimulado) ||
+        (simulacion && (!enteroPositivo(simulacion, torneo.jugadorSimulado) ||
+                        torneo.jugadorSimulado > N - N % 2))) {
+        std::cerr << "ERROR: use solo KOMIKAN_ABANDONA o KOMIKAN_FALLO_JUGADOR con el ID de un jugador con pareja.\n";
+        return 1;
+    }
+    torneo.simularFallo = falloSimulado != nullptr;
     const int cantidadMesas = std::min(M, N / 2);
     std::vector<ArgJugador> args;
     std::vector<pthread_t> hilos;
