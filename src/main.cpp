@@ -17,7 +17,7 @@ struct Pareja {
     bool terminada = false;
     Ganador resultado = NADIE;
     CierrePartida cierre = CIERRE_TIEMPO;
-    Celda abandona = VACIA; // protegido por Torneo::mtx
+    Tablero* tablero = nullptr; // protegido por Torneo::mtx; no usar fuera de el
 };
 
 struct Torneo {
@@ -106,8 +106,10 @@ bool notificarAbandono(Torneo& t, int id, bool falloControlado = false) {
     if (indice < static_cast<int>(t.parejas.size()) &&
         !t.detener && !t.fallo) {
         Pareja& pareja = t.parejas[indice];
-        if (pareja.jugando && !pareja.terminada && pareja.abandona == VACIA) {
-            pareja.abandona = id % 2 ? PUMA : PERRO;
+        // Orden: torneo -> tablero. aceptarAbandono libera tablero antes
+        // de adquirir salida, y la mesa retira el puntero antes de destruirlo.
+        if (pareja.jugando && !pareja.terminada && pareja.tablero &&
+            aceptarAbandono(*pareja.tablero, id % 2 ? PUMA : PERRO)) {
             aceptado = true;
             pthread_mutex_lock(&mtxSalida);
             std::cout << "[JUGADOR " << id << "] notifica abandono"
@@ -149,7 +151,7 @@ void* hiloJugador(void* p) {
         // La demostracion ocurre desde el jugador, una vez asignada su mesa.
         if (a.id == t.jugadorSimulado) {
             while (!t.detener && !t.fallo && !t.parejas[pareja].terminada &&
-                   !t.parejas[pareja].jugando)
+                   !t.parejas[pareja].tablero)
                 pthread_cond_wait(&t.cond, &t.mtx);
             timespec limite{};
             clock_gettime(CLOCK_REALTIME, &limite);
@@ -211,7 +213,7 @@ void* hiloMesa(void* p) {
         pthread_mutex_unlock(&mtxSalida);
         pthread_mutex_unlock(&t.mtx);
 
-        const ControlAbandono abandono{&t.mtx, &t.parejas[elegida].abandona};
+        const ControlAbandono abandono{&t.mtx, &t.cond, &t.parejas[elegida].tablero};
         CierrePartida cierre;
         const Ganador resultado = jugarPartida(cfg, a.id, &control, &abandono, &cierre);
 
