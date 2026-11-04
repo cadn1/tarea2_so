@@ -24,7 +24,10 @@ struct Tablero {
     std::vector<int> ady[NODOS];  // vecinos de cada nodo
     int capturados;               // perros capturados por el puma
     bool fin;                     // la partida termino, los hilos deben parar
+    Celda abandona;                // fin && abandona != VACIA: abandono aceptado
+    int errorEspera;               // error controlado de la espera de una ficha
     pthread_mutex_t mtx;          // un solo candado para todo el tablero
+    pthread_cond_t cambio = PTHREAD_COND_INITIALIZER; // despertar fichas al cerrar
 };
 
 inline void unir(Tablero& t, int a, int b) { // arista en ambos sentidos
@@ -40,6 +43,8 @@ inline void iniciarTablero(Tablero& t) { // vacia el tablero, arma las aristas y
     }
     t.capturados = 0;
     t.fin = false;
+    t.abandona = VACIA;
+    t.errorEspera = 0;
     for (int f = 0; f < FILAS; f++)
         for (int c = 0; c < COLS; c++) {
             if (c < COLS - 1) unir(t, nodo(f, c), nodo(f, c + 1));  // horizontal
@@ -57,16 +62,38 @@ inline void iniciarTablero(Tablero& t) { // vacia el tablero, arma las aristas y
 }
 
 inline void destruirTablero(Tablero& t) { // libera el mutex al cerrar la mesa
+    pthread_cond_destroy(&t.cambio); // solo despues de unir todas las fichas
     pthread_mutex_destroy(&t.mtx);
 }
 
+inline void terminarBajoMutex(Tablero& t) {
+    t.fin = true;
+    pthread_cond_broadcast(&t.cambio);
+}
 
 inline Ganador ganadorBajoMutex(const Tablero& t); // el que llama ya tiene el mutex
+
+// Compite con movimientos y capturas bajo el mismo mutex. La primera
+// transicion terminal prevalece; fin tambien rechaza solicitudes durante joins.
+inline bool aceptarAbandono(Tablero& t, Celda jugador) {
+    if (jugador != PUMA && jugador != PERRO) return false;
+    pthread_mutex_lock(&t.mtx);
+    bool aceptado = false;
+    if (!t.fin) {
+        if (ganadorBajoMutex(t) == NADIE) {
+            t.abandona = jugador;
+            aceptado = true;
+        }
+        terminarBajoMutex(t); // abandono aceptado o victoria anterior confirmada
+    }
+    pthread_mutex_unlock(&t.mtx);
+    return aceptado;
+}
 
 inline bool moverFicha(Tablero& t, int desde, int hacia, Celda tipo, int idPerro) { // intenta mover, true si lo logro
     pthread_mutex_lock(&t.mtx);
     if (t.fin || ganadorBajoMutex(t) != NADIE) {
-        t.fin = true;
+        terminarBajoMutex(t);
         pthread_mutex_unlock(&t.mtx);
         return false;
     }
@@ -85,7 +112,7 @@ inline bool moverFicha(Tablero& t, int desde, int hacia, Celda tipo, int idPerro
             }
         }
     }
-    if (ok && ganadorBajoMutex(t) != NADIE) t.fin = true;
+    if (ok && ganadorBajoMutex(t) != NADIE) terminarBajoMutex(t);
     pthread_mutex_unlock(&t.mtx);
     return ok;
 }
@@ -104,7 +131,7 @@ inline std::vector<std::array<int,3>> todosLosSaltos();
 inline bool capturarPerro(Tablero& t, int desde, int sobre, int hacia) { // salto del puma, true si captura
     pthread_mutex_lock(&t.mtx);
     if (t.fin || ganadorBajoMutex(t) != NADIE) {
-        t.fin = true;
+        terminarBajoMutex(t);
         pthread_mutex_unlock(&t.mtx);
         return false;
     }
@@ -123,7 +150,7 @@ inline bool capturarPerro(Tablero& t, int desde, int sobre, int hacia) { // salt
             }
         }
     }
-    if (ok && ganadorBajoMutex(t) != NADIE) t.fin = true;
+    if (ok && ganadorBajoMutex(t) != NADIE) terminarBajoMutex(t);
     pthread_mutex_unlock(&t.mtx);
     return ok;
 }
@@ -246,7 +273,7 @@ inline bool partidaTerminada(Tablero& t) { // los hilos preguntan esto en cada c
 
 inline void terminarPartida(Tablero& t) { // el juez avisa que se acabo
     pthread_mutex_lock(&t.mtx);
-    t.fin = true;
+    terminarBajoMutex(t);
     pthread_mutex_unlock(&t.mtx);
 }
 

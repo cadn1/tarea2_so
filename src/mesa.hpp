@@ -5,11 +5,87 @@
 #include <cstdlib>
 #include <vector>
 #include <array>
-#include <csignal>
+#include <cstring>
+#include <cerrno>
+#include <ctime>
 #include "tablero.hpp"
 
 // C++17: una sola instancia compartida por todas las mesas y unidades de traduccion.
 inline pthread_mutex_t mtxSalida = PTHREAD_MUTEX_INITIALIZER;
+
+enum CausaParada { SIN_PARADA, PARADA_SIGINT, PARADA_FALLO };
+enum CierrePartida { CIERRE_VICTORIA, CIERRE_ABANDONO, CIERRE_SIGINT, CIERRE_TIEMPO, CIERRE_FALLO };
+
+inline const char* nombreCierre(CierrePartida cierre) {
+    switch (cierre) {
+        case CIERRE_VICTORIA: return "VICTORIA";
+        case CIERRE_ABANDONO: return "ABANDONO";
+        case CIERRE_SIGINT: return "SIGINT";
+        case CIERRE_TIEMPO: return "TIEMPO";
+        case CIERRE_FALLO: return "FALLO INTERNO";
+    }
+    return "FALLO INTERNO";
+}
+
+struct ControlAbandono {
+    pthread_mutex_t* mtx;
+    pthread_cond_t* cond;
+    Tablero** tablero; // publicado solo mientras el tablero existe; protegido por mtx
+};
+
+// Conserva el mismo plazo ante despertares espurios. La condicion libera mtx
+// mientras duerme; fin se comprueba bajo ese mutex para no perder despertares.
+inline bool esperarRetardo(Tablero& t, int ms) {
+    pthread_mutex_lock(&t.mtx);
+    int error = 0;
+    if (!t.fin) {
+        timespec limite{};
+        if (clock_gettime(CLOCK_REALTIME, &limite) != 0) error = errno;
+        else {
+            limite.tv_sec += ms / 1000;
+            limite.tv_nsec += (ms % 1000) * 1000000L;
+            if (limite.tv_nsec >= 1000000000L) {
+                ++limite.tv_sec;
+                limite.tv_nsec -= 1000000000L;
+            }
+            while (!t.fin && error == 0)
+                error = pthread_cond_timedwait(&t.cambio, &t.mtx, &limite);
+        }
+        if (error != 0 && error != ETIMEDOUT) {
+            t.errorEspera = error;
+            terminarBajoMutex(t);
+        }
+    }
+    const bool activa = !t.fin;
+    pthread_mutex_unlock(&t.mtx);
+    return activa;
+}
+
+struct ControlParada {
+    pthread_mutex_t* mtx;
+    pthread_cond_t* cond;
+    bool* detener;
+    bool* fallo;
+};
+
+// Consultar sin tener adquirido el mutex del tablero ni el de salida.
+inline CausaParada consultarParada(const ControlParada* control) {
+    if (!control) return SIN_PARADA;
+    pthread_mutex_lock(control->mtx);
+    const CausaParada causa = *control->fallo ? PARADA_FALLO :
+                             (*control->detener ? PARADA_SIGINT : SIN_PARADA);
+    pthread_mutex_unlock(control->mtx);
+    return causa;
+}
+
+inline void notificarFallo(const ControlParada* control) {
+    if (!control) return;
+    pthread_mutex_lock(control->mtx);
+    *control->fallo = true;
+    *control->detener = true;
+    pthread_cond_broadcast(control->cond);
+    pthread_mutex_unlock(control->mtx);
+}
 
 struct ArgFicha { // datos que recibe cada hilo de ficha
     Tablero* t;
@@ -24,7 +100,7 @@ inline void* hiloPerro(void* p) { // ciclo de decision de un perro
     ArgFicha* a = static_cast<ArgFicha*>(p);
     Tablero& t = *a->t;
     while (!partidaTerminada(t) && perroEnPosicion(t, a->pos, a->idPerro)) {
-        usleep((a->minMs + rand_r(&a->semilla) % (a->maxMs - a->minMs + 1)) * 1000);
+        if (!esperarRetardo(t, a->minMs + rand_r(&a->semilla) % (a->maxMs - a->minMs + 1))) break;
         if (partidaTerminada(t) || !perroEnPosicion(t, a->pos, a->idPerro)) break; // capturado o fin
         const std::vector<int>& vecinos = t.ady[a->pos]; // solo lectura, no cambia tras iniciar
         int destino = vecinos[rand_r(&a->semilla) % vecinos.size()];
@@ -39,7 +115,7 @@ inline void* hiloPuma(void* p) { // ciclo de decision del puma: captura si puede
     Tablero& t = *a->t;
     std::vector<std::array<int,3>> saltos = todosLosSaltos(); // se calcula una sola vez
     while (!partidaTerminada(t)) {
-        usleep((a->minMs + rand_r(&a->semilla) % (a->maxMs - a->minMs + 1)) * 1000);
+        if (!esperarRetardo(t, a->minMs + rand_r(&a->semilla) % (a->maxMs - a->minMs + 1))) break;
         if (partidaTerminada(t)) break;
         bool hizo = false;
         for (const auto& s : saltos) { // primero intenta capturar
@@ -62,54 +138,78 @@ struct Config { // parametros de la partida, los llenara el parseo del config.tx
     unsigned semilla = 1;  // para repetir una partida
     int maxSegundos = 60;  // tope de duracion, evita partidas eternas
     int logCadaMs = 2000;  // cada cuanto se imprime el tablero
+    int puma = TRONO;
+    // El indice en este arreglo es el ID: conserva el orden de colocacion actual.
+    std::array<int, 12> perros{{13, 17, 18, 23, 19, 24, 20, 25, 21, 26, 22, 27}};
 };
 
-inline void colocarFichasIniciales(Tablero& t) { // posicion por defecto, el config puede cambiarla
-    int id = 0;
-    t.celdas[TRONO] = PUMA;
-    t.celdas[nodo(2, 0)] = PERRO;
-    t.idPerro[nodo(2, 0)] = id++;
-    t.celdas[nodo(2, 4)] = PERRO;
-    t.idPerro[nodo(2, 4)] = id++;
-    for (int c = 0; c < COLS; c++) {
-        t.celdas[nodo(3, c)] = PERRO;
-        t.idPerro[nodo(3, c)] = id++;
-        t.celdas[nodo(4, c)] = PERRO;
-        t.idPerro[nodo(4, c)] = id++;
+inline void colocarFichasIniciales(Tablero& t, const Config& cfg = Config{}) {
+    t.celdas[cfg.puma] = PUMA;
+    for (std::size_t id = 0; id < cfg.perros.size(); ++id) {
+        t.celdas[cfg.perros[id]] = PERRO;
+        t.idPerro[cfg.perros[id]] = static_cast<int>(id);
     }
 }
 
-inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_atomic_t* parar = nullptr) { // quien la llama hace de Juez
+inline Ganador jugarPartida(const Config& cfg, int idMesa, const ControlParada* parar = nullptr,
+                           const ControlAbandono* abandono = nullptr,
+                           CierrePartida* cierreSalida = nullptr) { // quien la llama hace de Juez
     Tablero t;
     iniciarTablero(t);
-    colocarFichasIniciales(t);
+    colocarFichasIniciales(t, cfg);
+    pthread_mutex_lock(&mtxSalida);
+    std::cout << "[MESA " << idMesa << "] tablero inicial:";
+    imprimirTablero(t);
+    pthread_mutex_unlock(&mtxSalida);
+    Ganador g = ganador(t);
+    if (g != NADIE) terminarPartida(t); // victoria inicial, antes de crear fichas
 
     ArgFicha args[13]; // 0 = puma, 1 a 12 = perros
     pthread_t th[13];
     int k = 0;         // cuantos perros hay
-    args[0] = ArgFicha{&t, TRONO, PUMA, cfg.semilla, -1, cfg.minMs, cfg.maxMs};
+    args[0] = ArgFicha{&t, cfg.puma, PUMA, cfg.semilla, -1, cfg.minMs, cfg.maxMs};
     for (int i = 0; i < NODOS; i++) {
         if (t.celdas[i] != PERRO) continue;
         k++;
         args[k] = ArgFicha{&t, i, PERRO, cfg.semilla + (unsigned)k, t.idPerro[i], cfg.minMs, cfg.maxMs};
     }
 
+    // Publicar despues de preparar los argumentos: desde aqui un jugador
+    // puede cerrar el tablero. Nunca se adquiere el torneo desde su mutex.
+    if (abandono) {
+        pthread_mutex_lock(abandono->mtx);
+        *abandono->tablero = &t;
+        pthread_cond_broadcast(abandono->cond);
+        pthread_mutex_unlock(abandono->mtx);
+    }
+
     int creados = 0;
     bool fallo = false;
-    for (int i = 0; i <= k && !fallo; i++) { // un hilo por ficha
+    CausaParada causa = consultarParada(parar);
+    for (int i = 0; i <= k && !fallo && g == NADIE; i++) { // un hilo por ficha en partida activa
+        causa = consultarParada(parar);
+        if (causa != SIN_PARADA || partidaTerminada(t)) break;
         void* (*f)(void*) = (i == 0) ? hiloPuma : hiloPerro;
-        if (pthread_create(&th[i], nullptr, f, &args[i]) != 0) fallo = true;
-        else creados++;
+        const int error = pthread_create(&th[i], nullptr, f, &args[i]);
+        if (error != 0) {
+            fallo = true;
+            notificarFallo(parar);
+            pthread_mutex_lock(&mtxSalida);
+            std::cerr << "[MESA " << idMesa << "] ERROR: pthread_create de ficha " << i
+                      << ": " << std::strerror(error) << '\n';
+            pthread_mutex_unlock(&mtxSalida);
+        } else creados++;
     }
 
     int cadaCiclos = (cfg.logCadaMs >= 100) ? cfg.logCadaMs / 100 : 1; // el juez revisa cada 100 ms
-    Ganador g = NADIE;
     int ciclos = 0;
-    while (!fallo && g == NADIE && ciclos < cfg.maxSegundos * 10) {
+    while (!fallo && causa == SIN_PARADA && g == NADIE && ciclos < cfg.maxSegundos * 10) {
         usleep(100 * 1000);
         ciclos++;
-        if (parar && *parar) break; // llego Ctrl+C
+        causa = consultarParada(parar);
+        if (causa != SIN_PARADA) break;
         g = ganador(t);
+        if (partidaTerminada(t)) break;
         if (ciclos % cadaCiclos == 0) { // log del estado
             pthread_mutex_lock(&mtxSalida); // salida antes del mutex interno del tablero
             std::cout << "[MESA " << idMesa << "] estado:";
@@ -119,7 +219,40 @@ inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_at
     }
 
     terminarPartida(t); // avisa a todos los hilos que paren
-    for (int i = 0; i < creados; i++) pthread_join(th[i], nullptr);
+    if (abandono) {
+        pthread_mutex_lock(abandono->mtx);
+        *abandono->tablero = nullptr; // rechazar solicitudes antes de joins/destruccion
+        pthread_mutex_unlock(abandono->mtx);
+    }
+    bool falloJoin = false;
+    for (int i = 0; i < creados; i++) {
+        const int error = pthread_join(th[i], nullptr);
+        if (error != 0) {
+            falloJoin = true;
+            notificarFallo(parar);
+            pthread_mutex_lock(&mtxSalida);
+            std::cerr << "[MESA " << idMesa << "] ERROR: pthread_join de ficha " << i
+                      << ": " << std::strerror(error) << '\n';
+            pthread_mutex_unlock(&mtxSalida);
+        }
+    }
+    // Si no se confirmo la salida, no liberar el tablero ni los argumentos de esas fichas.
+    if (falloJoin) std::_Exit(EXIT_FAILURE);
+    const Celda abandona = t.abandona; // todas las fichas ya estan unidas
+    if (t.errorEspera != 0) {
+        fallo = true;
+        notificarFallo(parar);
+        pthread_mutex_lock(&mtxSalida);
+        std::cerr << "[MESA " << idMesa << "] ERROR: espera de ficha: "
+                  << std::strerror(t.errorEspera) << '\n';
+        pthread_mutex_unlock(&mtxSalida);
+    }
+    g = ganador(t); // conservar una victoria real ocurrida justo antes del cierre
+    const CierrePartida cierre = fallo || causa == PARADA_FALLO ? CIERRE_FALLO :
+        (abandona != VACIA ? CIERRE_ABANDONO : (g != NADIE ? CIERRE_VICTORIA :
+        (causa == PARADA_SIGINT ? CIERRE_SIGINT : CIERRE_TIEMPO)));
+    if (cierre == CIERRE_ABANDONO) g = abandona == PUMA ? GANAN_PERROS : GANA_PUMA;
+    if (cierreSalida) *cierreSalida = cierre;
     pthread_mutex_lock(&mtxSalida);
     std::cout << "[MESA " << idMesa << "] tablero final:";
     imprimirTablero(t);
@@ -129,7 +262,9 @@ inline Ganador jugarPartida(const Config& cfg, int idMesa, const volatile sig_at
     std::cout << "[MESA " << idMesa << "] fin. Ganador: "
               << (g == GANA_PUMA ? "PUMA" : (g == GANAN_PERROS ? "PERROS" : "NADIE"))
               << " | vivos: " << vivos << " | capturados: " << t.capturados
-              << " | total: " << vivos + t.capturados << std::endl;
+              << " | total: " << vivos + t.capturados
+              << " | cierre: " << nombreCierre(cierre)
+              << std::endl;
     pthread_mutex_unlock(&mtxSalida);
     destruirTablero(t);
     return g;
