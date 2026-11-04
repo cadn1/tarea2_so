@@ -1,3 +1,4 @@
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -12,6 +13,18 @@ bool mismaConfig(const Config& a, const Config& b) {
     return a.minMs == b.minMs && a.maxMs == b.maxMs && a.semilla == b.semilla &&
            a.maxSegundos == b.maxSegundos && a.logCadaMs == b.logCadaMs &&
            a.puma == b.puma && a.perros == b.perros;
+}
+
+bool diagnosticoContiene(const std::string& error, const std::string& esperado) {
+    const auto inicio = error.find(": ");
+    if (inicio == std::string::npos || esperado.empty()) return false;
+    auto minusculas = [](std::string texto) {
+        for (char& c : texto) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return texto;
+    };
+    // Solo comparar el motivo sin distinguir mayusculas. Archivo y linea
+    // mantienen sus comprobaciones exactas en cada caso de prueba.
+    return minusculas(error.substr(inicio + 2)).find(minusculas(esperado)) != std::string::npos;
 }
 
 int main() {
@@ -54,7 +67,7 @@ int main() {
             if (lineaError)
                 comprobar(error.find(ruta + ":" + std::to_string(lineaError) + ":") == 0,
                           nombre + ": NUMERO DE LINEA INCORRECTO; " + error);
-            comprobar(error.find(detalle) != std::string::npos, nombre + ": DIAGNOSTICO INCORRECTO; " + error);
+            comprobar(diagnosticoContiene(error, detalle), nombre + ": DIAGNOSTICO INCORRECTO; " + error);
         }
         if (fallos == antesFallos) std::cout << "OK: " << nombre << '\n';
         return cfg;
@@ -99,8 +112,8 @@ int main() {
     probar("espacio dentro del numero", "minMs=5 0\n", false, 1, "entero");
     probar("desbordamiento int", "minMs=999999999999999999999999\n", false, 1, "rango");
     probar("semilla negativa", "semilla=-1\n", false, 1, "sin signo");
-    probar("desbordamiento unsigned", "semilla=184467440737095516160\n", false, 1, "unsigned");
-    probar("semilla con sufijo", "semilla=12x\n", false, 1, "unsigned");
+    probar("desbordamiento unsigned", "semilla=184467440737095516160\n", false, 1, "semilla debe ser un entero sin signo");
+    probar("semilla con sufijo", "semilla=12x\n", false, 1, "semilla debe ser un entero sin signo");
     probar("minimo cero", "minMs=0\n", false, 1, "positivo");
     probar("minimo negativo", "minMs=-1\n", false, 1, "positivo");
     probar("retardos invertidos", "minMs=80\nmaxMs=70\n", false, 2, "mayor o igual");
@@ -121,22 +134,28 @@ int main() {
     probar("perros duplicados", "perros=13,13,18,23,19,24,20,25,21,26,22,27", false, 1, "repetida");
     probar("perro coincide con puma", "perros=0,17,18,23,19,24,20,25,21,26,22,27", false, 1, "misma posicion");
     probar("ocupacion validada al finalizar lectura", "perros=0,17,18,23,19,24,20,25,21,26,22,27\npuma=4", true);
-    probar("once perros", "perros=13,17,18,23,19,24,20,25,21,26,22", false, 1, "doce");
-    probar("trece perros", "perros=13,17,18,23,19,24,20,25,21,26,22,27,1", false, 1, "doce");
-    probar("coma final", "perros=13,17,18,23,19,24,20,25,21,26,22,27,", false, 1, "doce");
-    probar("elemento vacio", "perros=13,,18,23,19,24,20,25,21,26,22,27", false, 1, "posicion entera");
-    probar("posicion con sufijo", "perros=13x,17,18,23,19,24,20,25,21,26,22,27", false, 1, "posicion entera");
+    probar("once perros", "perros=13,17,18,23,19,24,20,25,21,26,22", false, 1, "perros debe contener exactamente 12 posiciones");
+    probar("trece perros", "perros=13,17,18,23,19,24,20,25,21,26,22,27,1", false, 1, "perros debe contener exactamente 12 posiciones");
+    probar("coma final", "perros=13,17,18,23,19,24,20,25,21,26,22,27,", false, 1, "perros debe contener exactamente 12 posiciones");
+    probar("elemento vacio", "perros=13,,18,23,19,24,20,25,21,26,22,27", false, 1, "perros: posicion invalida o fuera del rango int");
+    probar("posicion con sufijo", "perros=13x,17,18,23,19,24,20,25,21,26,22,27", false, 1, "perros: posicion invalida o fuera del rango int");
     probar("desbordamiento posicion", "perros=99999999999999999999,17,18,23,19,24,20,25,21,26,22,27",
-           false, 1, "rango de int");
+           false, 1, "perros: posicion invalida o fuera del rango int");
     {
         ++casos;
         Config cfg;
+        cfg.minMs = 7;
+        cfg.semilla = 99;
         const Config antes = cfg;
         std::string error;
         const std::string ruta = std::string(directorio) + "/no_existe.txt";
-        comprobar(!leerConfig(ruta, cfg, error) && mismaConfig(cfg, antes) &&
-                  error.find(ruta + ":") == 0 && error.find("abrir") != std::string::npos,
-                  "archivo inexistente y salida intacta");
+        const int antesFallos = fallos;
+        comprobar(!leerConfig(ruta, cfg, error), "archivo inexistente: DEBE SER RECHAZADO");
+        comprobar(mismaConfig(cfg, antes), "archivo inexistente: SALIDA MODIFICADA TRAS RECHAZO");
+        comprobar(error.find(ruta + ":") == 0, "archivo inexistente: FALTA NOMBRE DEL ARCHIVO");
+        comprobar(diagnosticoContiene(error, "no se pudo abrir el archivo"),
+                  "archivo inexistente: DIAGNOSTICO INCORRECTO; " + error);
+        if (fallos == antesFallos) std::cout << "OK: archivo inexistente y salida intacta\n";
     }
     {
         Tablero t;
