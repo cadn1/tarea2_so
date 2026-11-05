@@ -84,7 +84,7 @@ int main() {
     };
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         colocarFichasIniciales(t);
         std::set<int> ids;
         for (int i = 0; i < NODOS; ++i) if (t.idPerro[i] >= 0) ids.insert(t.idPerro[i]);
@@ -93,7 +93,7 @@ int main() {
     }
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[13] = PUMA;
         t.celdas[14] = PERRO; t.idPerro[14] = 0;
         t.celdas[19] = PERRO; t.idPerro[19] = 1;
@@ -132,7 +132,7 @@ int main() {
     }
     for (int caso = 0; caso < 12; ++caso) {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[13] = PUMA;
         t.celdas[14] = PERRO; t.idPerro[14] = 0;
         Puerta inicioCaptura, inicioMovimiento, finCaptura, finMovimiento;

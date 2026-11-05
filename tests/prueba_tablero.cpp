@@ -23,7 +23,7 @@ int main() {
     // Cada escenario inicializa y destruye su propio mutex exactamente una vez.
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[TRONO] = PUMA;
         t.celdas[TECHO_IZQ] = PERRO;
         t.celdas[TECHO_DER] = PERRO;
@@ -45,7 +45,7 @@ int main() {
 
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[nodo(2, 2)] = PUMA;
         t.celdas[nodo(2, 1)] = PERRO;
         t.celdas[nodo(2, 3)] = PERRO;
@@ -58,7 +58,7 @@ int main() {
 
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[nodo(2, 2)] = PUMA;
         t.celdas[nodo(2, 3)] = PERRO;
         t.capturados = 5;

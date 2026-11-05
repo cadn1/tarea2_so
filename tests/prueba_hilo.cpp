@@ -3,7 +3,7 @@
 
 int main() {
     Tablero t;
-    iniciarTablero(t);
+    if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
     t.celdas[nodo(2, 2)] = PERRO;
     t.idPerro[nodo(2, 2)] = 0;
     ArgFicha a{&t, nodo(2, 2), PERRO, 42, 0, 50, 300};

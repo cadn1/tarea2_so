@@ -29,7 +29,7 @@ bool igual(const Tablero& t, const Estado& e) {
 }
 
 void preparar(Tablero& t) {
-    iniciarTablero(t);
+    if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
     t.celdas[13] = PUMA;
     t.celdas[14] = PERRO;
     t.idPerro[14] = 0;
@@ -145,7 +145,7 @@ int main() {
     }
     {
         Tablero t; // PERROS BLOQUEAN AL PUMA
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[TRONO] = PUMA;
         const int perros[] = {1, 2, 5, 3, 7, 11};
         for (int id = 0; id < 6; ++id) {
@@ -179,7 +179,7 @@ int main() {
     }
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[0] = PUMA;
         const int perros[] = {1, 2, 5, 3, 7, 10};
         for (int id = 0; id < 6; ++id) {

@@ -41,7 +41,7 @@ int main() {
     //DOS HILOS Y ORDEN IMPUESTO X CONDICION
     for (bool victoriaPrimero : {false, true}) {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         t.celdas[13] = PUMA;
         t.celdas[14] = PERRO;
         t.idPerro[14] = 0;
@@ -69,7 +69,7 @@ int main() {
     }
     for (Celda jugador : {PUMA, PERRO}) {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         colocarFichasIniciales(t);
         comprobar(aceptarAbandono(t, jugador) && t.fin && t.abandona == jugador,
                   "AMBOS JUGADORES PUEDEN CERRAR EL TABLERO INMEDIATAMENTE");
@@ -77,7 +77,7 @@ int main() {
     }
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         colocarFichasIniciales(t);
         terminarPartida(t); // CIERRE POR TIEMPO, SIGINT o FALLO: NO ES ABANDONO
         comprobar(!aceptarAbandono(t, PUMA) && t.abandona == VACIA,

@@ -3,7 +3,7 @@
 
 int main() {
     Tablero t;
-    iniciarTablero(t);
+    if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
     t.celdas[nodo(2, 2)] = PUMA;
     int posPerros[3] = {nodo(2, 3), nodo(3, 2), nodo(1, 1)};
     ArgFicha puma{&t, nodo(2, 2), PUMA, 1, -1, 50, 300};
