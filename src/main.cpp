@@ -12,7 +12,8 @@
 #include "config.hpp"
 
 struct Pareja {
-    int llegadas = 0;
+    int puma = 0;
+    int perros = 0; // ambos IDs se asignan juntos al completar la pareja
     bool jugando = false;
     bool terminada = false;
     Ganador resultado = NADIE;
@@ -20,10 +21,19 @@ struct Pareja {
     Tablero* tablero = nullptr; // protegido por Torneo::mtx; no usar fuera de el
 };
 
+struct Jugador {
+    int pareja = -1;
+    Celda rol = VACIA;
+};
+
 struct Torneo {
     int jugadores;
     const Config* config; // vive en main hasta esperar todos los trabajadores
     std::vector<Pareja> parejas;
+    std::vector<Jugador> participantes; // indexado por ID - 1; protegido por mtx
+    int esperandoPareja = 0; // a lo sumo un jugador pendiente de companero
+    int llegados = 0;
+    std::size_t parejasFormadas = 0;
     std::size_t terminadas = 0;
     bool fallo = false;
     bool detener = false;
@@ -101,15 +111,16 @@ int restaurarMascara(const sigset_t& anterior) {
 bool notificarAbandono(Torneo& t, int id, bool falloControlado = false) {
     if (id <= 0 || id > t.jugadores) return false;
     pthread_mutex_lock(&t.mtx);
-    const int indice = (id - 1) / 2;
+    const Jugador& jugador = t.participantes[id - 1];
+    const int indice = jugador.pareja;
     bool aceptado = false;
-    if (indice < static_cast<int>(t.parejas.size()) &&
+    if (indice >= 0 && indice < static_cast<int>(t.parejas.size()) &&
         !t.detener && !t.fallo) {
         Pareja& pareja = t.parejas[indice];
         // Orden: torneo -> tablero. aceptarAbandono libera tablero antes
         // de adquirir salida, y la mesa retira el puntero antes de destruirlo.
         if (pareja.jugando && !pareja.terminada && pareja.tablero &&
-            aceptarAbandono(*pareja.tablero, id % 2 ? PUMA : PERRO)) {
+            aceptarAbandono(*pareja.tablero, jugador.rol)) {
             aceptado = true;
             pthread_mutex_lock(&mtxSalida);
             std::cout << "[JUGADOR " << id << "] notifica abandono"
@@ -127,27 +138,40 @@ void* hiloJugador(void* p) {
     const ArgJugador& a = *static_cast<ArgJugador*>(p);
     Torneo& t = *a.torneo;
     pthread_mutex_lock(&t.mtx);
-    pthread_mutex_lock(&mtxSalida);
-    std::cout << "[JUGADOR " << a.id << "] llegada registrada.\n";
-    pthread_mutex_unlock(&mtxSalida);
-    if (t.jugadores % 2 != 0 && a.id == t.jugadores) {
-        pthread_mutex_lock(&mtxSalida);
-        std::cout << "[JUGADOR " << a.id << "] sin pareja.\n";
-        pthread_mutex_unlock(&mtxSalida);
-        pthread_mutex_unlock(&t.mtx);
-        return nullptr;
-    }
-    const int pareja = (a.id - 1) / 2;
+    Jugador& jugador = t.participantes[a.id - 1];
     if (!t.detener && !t.fallo) {
-        ++t.parejas[pareja].llegadas;
-        if (t.parejas[pareja].llegadas == 2) { // solo el segundo integrante anuncia
-            const int primero = pareja * 2 + 1;
+        // Este registro bajo mtx define el orden real, no pthread_create ni el ID.
+        ++t.llegados;
+        pthread_mutex_lock(&mtxSalida);
+        std::cout << "[JUGADOR " << a.id << "] llegada registrada. ORDEN " << t.llegados << '\n';
+        pthread_mutex_unlock(&mtxSalida);
+        if (t.esperandoPareja == 0) t.esperandoPareja = a.id;
+        else {
+            const int primero = t.esperandoPareja;
+            const int indice = static_cast<int>(t.parejasFormadas++);
+            t.parejas[indice].puma = primero;
+            t.parejas[indice].perros = a.id;
+            t.participantes[primero - 1] = Jugador{indice, PUMA};
+            jugador = Jugador{indice, PERRO};
+            t.esperandoPareja = 0;
             pthread_mutex_lock(&mtxSalida);
-            std::cout << "[PAREJA " << pareja + 1 << "] EMPAREJADOS: JUGADOR "
-                      << primero << " (PUMA) VS JUGADOR " << primero + 1 << " (PERROS)\n";
+            std::cout << "[PAREJA " << indice + 1 << "] EMPAREJADOS: JUGADOR "
+                      << primero << " (PUMA) VS JUGADOR " << a.id << " (PERROS)\n";
             pthread_mutex_unlock(&mtxSalida);
-            pthread_cond_broadcast(&t.cond);
         }
+        pthread_cond_broadcast(&t.cond);
+        while (!t.detener && !t.fallo && jugador.pareja < 0 &&
+               !(t.llegados == t.jugadores && t.terminadas == t.parejas.size()))
+            pthread_cond_wait(&t.cond, &t.mtx);
+        if (jugador.pareja < 0) {
+            pthread_mutex_lock(&mtxSalida);
+            std::cout << "[JUGADOR " << a.id << "] "
+                      << (t.detener || t.fallo ? "cierre del torneo; sin pareja.\n" : "sin pareja.\n");
+            pthread_mutex_unlock(&mtxSalida);
+            pthread_mutex_unlock(&t.mtx);
+            return nullptr;
+        }
+        const int pareja = jugador.pareja;
         // La demostracion ocurre desde el jugador, una vez asignada su mesa.
         if (a.id == t.jugadorSimulado) {
             while (!t.detener && !t.fallo && !t.parejas[pareja].terminada &&
@@ -178,7 +202,8 @@ void* hiloJugador(void* p) {
             pthread_mutex_unlock(&mtxSalida);
         }
     }
-    if ((t.detener || t.fallo) && !t.parejas[pareja].terminada) {
+    if ((t.detener || t.fallo) &&
+        (jugador.pareja < 0 || !t.parejas[jugador.pareja].terminada)) {
         pthread_mutex_lock(&mtxSalida);
         std::cout << "[JUGADOR " << a.id << "] cierre del torneo; sin resultado de partida.\n";
         pthread_mutex_unlock(&mtxSalida);
@@ -197,7 +222,7 @@ void* hiloMesa(void* p) {
         int elegida = -1;
         for (std::size_t i = 0; i < t.parejas.size(); ++i) {
             const Pareja& pareja = t.parejas[i];
-            if (pareja.llegadas == 2 && !pareja.jugando && !pareja.terminada) {
+            if (pareja.perros != 0 && !pareja.jugando && !pareja.terminada) {
                 elegida = static_cast<int>(i);
                 break;
             }
@@ -288,8 +313,8 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
     const char* simulacion = abandonoSimulado ? abandonoSimulado : falloSimulado;
     if ((abandonoSimulado && falloSimulado) ||
         (simulacion && (!enteroPositivo(simulacion, torneo.jugadorSimulado) ||
-                        torneo.jugadorSimulado > N - N % 2))) {
-        std::cerr << "ERROR: use solo KOMIKAN_ABANDONA o KOMIKAN_FALLO_JUGADOR con el ID de un jugador con pareja.\n";
+                        torneo.jugadorSimulado > N))) {
+        std::cerr << "ERROR: use solo KOMIKAN_ABANDONA o KOMIKAN_FALLO_JUGADOR con un ID entre 1 y N.\n";
         return 1;
     }
     torneo.simularFallo = falloSimulado != nullptr;
@@ -300,6 +325,7 @@ int main(int argc, char* argv[]) { // VALIDAR CANTIDAD DE ARGUMENTOS
     std::vector<pthread_t> mesas;
     try { // RESERVAR ANTES DE CREAR HILOS MANTIENE ESTABLES SUS ARGUMENTOS
         torneo.parejas.resize(N / 2);
+        torneo.participantes.resize(N);
         args.resize(N);
         hilos.resize(N);
         argsMesas.resize(cantidadMesas);
