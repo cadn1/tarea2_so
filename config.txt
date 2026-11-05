@@ -1,0 +1,13 @@
+# retardo de cada ficha entre movimientos (ms)
+minMs=50
+maxMs=300
+# semilla del azar
+semilla=42
+# duracion maxima de una partida (s)
+maxSegundos=60
+# cada cuantos ms se imprime el tablero
+logCadaMs=2000
+# nodo inicial del puma
+puma=0
+# nodos iniciales de los 12 perros
+perros=13,17,18,23,19,24,20,25,21,26,22,27
