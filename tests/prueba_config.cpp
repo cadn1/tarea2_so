@@ -159,7 +159,7 @@ int main() {
     }
     {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         colocarFichasIniciales(t);
         comprobar(t.celdas[predeterminada.puma] == PUMA, "puma predeterminado coincide con colocacion actual");
         for (std::size_t id = 0; id < predeterminada.perros.size(); ++id)

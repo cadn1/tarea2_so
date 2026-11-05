@@ -35,7 +35,8 @@ inline void unir(Tablero& t, int a, int b) { // arista en ambos sentidos
     t.ady[b].push_back(a);
 }
 
-inline void iniciarTablero(Tablero& t) { // vacia el tablero, arma las aristas y crea el mutex
+// Retorna el codigo pthread; ante error no usar el tablero ni llamar destruirTablero.
+[[nodiscard]] inline int iniciarTablero(Tablero& t) { // vacia el tablero, arma las aristas y crea el mutex
     for (int i = 0; i < NODOS; i++) {
         t.celdas[i] = VACIA;
         t.idPerro[i] = -1;
@@ -58,7 +59,13 @@ inline void iniciarTablero(Tablero& t) { // vacia el tablero, arma las aristas y
     unir(t, TECHO_DER, nodo(0, 4));
     unir(t, TRONO, nodo(0, 2));       // vertical del trono al centro
     unir(t, TECHO_IZQ, TECHO_DER);    // barra entre los dos del techo
-    pthread_mutex_init(&t.mtx, nullptr);
+    const int error = pthread_mutex_init(&t.mtx, nullptr);
+    if (error != 0) {
+        // cambio se inicializa al construir Tablero y todavia no tiene usuarios.
+        // El mutex que fallo no debe destruirse.
+        pthread_cond_destroy(&t.cambio);
+    }
+    return error;
 }
 
 inline void destruirTablero(Tablero& t) { // libera el mutex al cerrar la mesa

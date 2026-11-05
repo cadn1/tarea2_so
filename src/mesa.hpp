@@ -155,7 +155,16 @@ inline Ganador jugarPartida(const Config& cfg, int idMesa, const ControlParada* 
                            const ControlAbandono* abandono = nullptr,
                            CierrePartida* cierreSalida = nullptr) { // quien la llama hace de Juez
     Tablero t;
-    iniciarTablero(t);
+    const int errorInicio = iniciarTablero(t);
+    if (errorInicio != 0) {
+        if (cierreSalida) *cierreSalida = CIERRE_FALLO;
+        notificarFallo(parar);
+        pthread_mutex_lock(&mtxSalida);
+        std::cerr << "[MESA " << idMesa << "] ERROR: pthread_mutex_init del tablero: "
+                  << std::strerror(errorInicio) << '\n';
+        pthread_mutex_unlock(&mtxSalida);
+        return NADIE; // sin publicar t, crear fichas ni destruir su mutex fallido
+    }
     colocarFichasIniciales(t, cfg);
     pthread_mutex_lock(&mtxSalida);
     std::cout << "[MESA " << idMesa << "] tablero inicial:";

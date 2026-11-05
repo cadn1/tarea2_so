@@ -12,8 +12,8 @@ int main() {
     cfg.puma = 12;
     cfg.perros = {{27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 13}};
     Tablero a, b;
-    iniciarTablero(a);
-    iniciarTablero(b);
+    if (iniciarTablero(a) != 0) std::exit(EXIT_FAILURE);
+    if (iniciarTablero(b) != 0) std::exit(EXIT_FAILURE);
     colocarFichasIniciales(a, cfg);
     colocarFichasIniciales(b, cfg);
     bool colocacion = true;

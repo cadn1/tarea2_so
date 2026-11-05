@@ -16,7 +16,7 @@ int main() {
     auto probar = [&](const std::string& nombre, int desde, int sobre, int hacia,
                       Celda origen, Celda intermedio, Celda destino, bool esperado) {
         Tablero t;
-        iniciarTablero(t);
+        if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
         if (desde >= 0 && desde < NODOS) t.celdas[desde] = origen;
         if (sobre >= 0 && sobre < NODOS) t.celdas[sobre] = intermedio;
         if (hacia >= 0 && hacia < NODOS) t.celdas[hacia] = destino;

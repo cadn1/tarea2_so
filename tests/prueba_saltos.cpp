@@ -9,7 +9,7 @@
 int main() {
     using Salto = std::array<int, 3>;
     Tablero t;
-    iniciarTablero(t);
+    if (iniciarTablero(t) != 0) std::exit(EXIT_FAILURE);
     int errores = 0;
     auto comprobar = [&](bool condicion, const std::string& mensaje) {
         if (!condicion) {
