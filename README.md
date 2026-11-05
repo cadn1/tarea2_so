@@ -120,5 +120,5 @@ g++ -Wall -Wextra -Werror -std=c++17 -pthread -I src tests/prueba_cierre.cpp -o 
 
 ## Autores
 
-- Juan Pablo Manriquez
-- Cristobal Deck
+- Juan Pablo Manríquez
+- Cristóbal Deck
