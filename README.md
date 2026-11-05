@@ -1,4 +1,4 @@
-# Komikan Concurrente
+# Torneo Komikan
 
 Torneo concurrente de **Komikan** (Tarea 2 de Sistemas Operativos): un Puma contra 12 Perros en un tablero de 28 nodos, con jugadores, mesas de juego y árbitros que corren simultáneamente usando hilos POSIX, mutex y variables de condición.
 
