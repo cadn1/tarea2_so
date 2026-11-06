@@ -185,13 +185,13 @@ La decisión de usar **un mutex por tablero** simplifica la integridad de los mo
 ## 8. Archivos y pruebas
 
 ```text
-src/main.cpp       Servidor, emparejamiento por llegada, mesas, SIGINT y jugadores
-src/mesa.hpp       Partida, juez, hilos de fichas, cierre y resultados
-src/tablero.hpp    Geometría, movimientos, capturas y condiciones de victoria
-src/config.hpp     Lectura y validación de configuración
-tests/prueba_*.cpp Pruebas C++ de geometría, saltos, capturas, concurrencia y cierres
-config.txt         Ejemplo de configuración
-README.md          Esta guía
+src/main.cpp                 Servidor, emparejamiento por llegada, mesas, SIGINT y jugadores
+src/mesa.hpp                 Partida, juez, hilos de fichas, cierre y resultados
+src/tablero.hpp              Geometría, movimientos, capturas y condiciones de victoria
+src/config.hpp               Lectura y validación de configuración
+tests/prueba_*.cpp           Pruebas C++ de geometría, saltos, capturas, concurrencia y cierres
+config.txt                   Ejemplo de configuración
+README.md                    Esta guía
 informe_tarea2_so.pdf        Informe técnico de entrega (máximo 2 páginas)
 ```
 
