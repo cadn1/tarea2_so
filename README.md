@@ -1,122 +1,224 @@
-# Torneo Komikan
+# Torneo de Komikan Concurrente — Tarea 2 de Sistemas Operativos
 
-Torneo concurrente de **Komikan** (Tarea 2 de Sistemas Operativos): un Puma contra 12 Perros en un tablero de 28 nodos, con jugadores, mesas de juego y árbitros que corren simultáneamente usando hilos POSIX, mutex y variables de condición.
+Implementación en **C++17 con POSIX Threads (`pthreads`)** de un torneo automático de Komikan. Cada partida enfrenta a un **Puma** contra **12 Perros** en un tablero de **28 nodos**. Las fichas se mueven concurrentemente, sin turnos estrictos; un servidor forma parejas de jugadores y administra hasta `M` mesas de juego simultáneas.
 
-## Requisitos
+> **Modalidad:** el juego se simula automáticamente. No se escriben movimientos en la terminal. `N` y `M` son parámetros del torneo, no coordenadas del tablero.
 
-- Sistema operativo tipo Unix (Linux, probado en Ubuntu 24.04)
-- Compilador `g++` con soporte para C++17 y pthreads
-- No requiere librerías externas adicionales
+## 1. Requisitos y compilación
 
-## Compilación
+- Sistema Unix/Linux con `g++` y soporte para C++17 y pthreads (proyecto utilizado en Linux/CachyOS).
+- No requiere librerías externas.
+
+Desde la raíz del repositorio:
 
 ```bash
-g++ -Wall -Wextra -Werror -std=c++17 -pthread -I src src/main.cpp -o torneo
+g++ -Wall -Wextra -std=c++17 -pthread -I src src/main.cpp -o torneo
 ```
 
-## Estructura del Directorio
+También se ha comprobado la compilación con `-Werror` añadido a esos parámetros.
 
-```text
-📁 tarea2_so/
-├── 📁 src/
-│   ├── config.hpp
-│   ├── main.cpp
-│   ├── mesa.hpp
-│   └── tablero.hpp
-├── 📁 tests/
-│   └── prueba_*.cpp
-├── config.txt
-├── informe.pdf
-└── README.md
-```
-
-## Uso
+## 2. Cómo ejecutar el torneo
 
 ```bash
 ./torneo N M [config.txt]
 ```
 
-| Argumento | Descripción |
+| Parámetro | Significado |
 |---|---|
-| `N` | Cantidad de jugadores que llegan al torneo |
-| `M` | Máximo de mesas (partidas) simultáneas |
-| `config.txt` | Archivo opcional de configuración (ver más abajo) |
+| `N` | Número de jugadores (hilos de jugadores). Debe ser un entero positivo. |
+| `M` | Número máximo de mesas activas simultáneamente. Debe ser un entero positivo. |
+| `config.txt` | Archivo opcional de configuración. Si se omite, se usan los valores predeterminados. |
 
 Ejemplos:
+
 ```bash
-./torneo 4 2                 # 2 parejas, hasta 2 partidas a la vez
-./torneo 6 2 config.txt      # 3 parejas, 2 mesas: la tercera pareja espera una mesa libre
+./torneo 2 1
+./torneo 4 2
+./torneo 6 2 config.txt
 ```
 
-Los jugadores se emparejan por orden de llegada, de a dos: el primero es el Puma y el segundo los Perros. Si `N` es impar, un jugador queda sin pareja. El programa juega solo; no se ingresan comandos. Con `Ctrl+C` el torneo se detiene de forma ordenada y termina con código `130`.
+Cada jugador registra su llegada. **Los dos primeros que llegan forman la primera pareja, los dos siguientes la segunda**, y así sucesivamente; no se emparejan por ID fijo. El primero de cada pareja representa al **Puma** y el segundo a los **Perros**. Si `N` es impar, el último en llegar queda sin pareja y termina limpiamente al finalizar el torneo.
 
-## Reglas implementadas
+Existen como máximo `min(M, N/2)` trabajadores de mesa. Si hay parejas pendientes, esperan pasivamente; una mesa liberada puede atender otra pareja. El orden de llegada puede variar entre ejecuciones por la planificación de los hilos.
 
-- El Puma se mueve a casillas adyacentes libres y captura saltando en línea recta sobre un perro hacia una casilla vacía.
-- Los 12 Perros se mueven a casillas adyacentes libres y no capturan.
-- **Gana el Puma** al capturar 6 perros. **Ganan los Perros** si el Puma queda sin movimientos ni capturas posibles.
-- No hay turnos: cada ficha se mueve por su cuenta, con retardos aleatorios entre `minMs` y `maxMs` (por defecto 50 a 300 ms).
-- Si un jugador abandona, gana su oponente.
+## 3. Reglas implementadas
 
-El tablero es un grafo de 28 nodos: `0` es el trono, `1` y `2` los nodos del techo, y `3` a `27` la cuadrícula 5×5 por filas (el nodo de la fila `f`, columna `c` es `3 + 5*f + c`). Se imprime en ASCII.
+- El tablero posee **28 nodos**: `0` es el trono; `1` y `2` son nodos superiores; los nodos `3` a `27` forman una cuadrícula de 5×5.
+- **Puma:** ocupa una casilla; se mueve a posiciones adyacentes vacías y puede capturar saltando sobre un Perro a una posición vacía válida. Existen trayectorias especiales en el sector superior del tablero.
+- **Perros:** son 12 fichas con identidad individual; avanzan a casillas adyacentes vacías, **sin capturar**. No realizan movimientos diagonales no permitidos por el tablero.
+- **Victoria del Puma:** captura **6 Perros**.
+- **Victoria de los Perros:** el Puma queda sin movimientos simples ni capturas posibles.
+- **Sin turnos:** cada ficha intenta actuar mediante su propio hilo, con retardos aleatorios configurables.
 
-## Salida
+No se garantiza que haya un ganador antes del límite de tiempo: una partida puede cerrar por `TIEMPO`.
 
-Eventos principales (ejemplo con `./torneo 6 2 config.txt`):
+## 4. Cómo leer los tableros y los resultados
+
+El tablero se imprime usando texto ASCII:
+
+| Texto/símbolo | Significado |
+|---|---|
+| `Puma` | Ubicación actual del Puma. |
+| `Perro` | Ubicación de un Perro. La identidad de cada perro se conserva internamente. |
+| `.` | Posición vacía. |
+| Líneas (`-`, `|`, `/`, `\`) | Dibujo de las conexiones del tablero. |
+
+**Se muestran tres tipos de tablero:**
+
+1. **`[MESA X] tablero inicial:`** muestra las posiciones antes de comenzar a mover las fichas.
+2. **`[MESA X] estado:`** es una fotografía periódica de la partida. Su frecuencia aproximada depende de `logCadaMs`; **no representa cada movimiento individual**.
+3. **`[MESA X] tablero final:`** muestra las posiciones al terminar esa partida.
+
+Las mesas imprimen sus tableros independientemente. `X` identifica la mesa, no la pareja; una misma mesa puede atender varias parejas.
+
+Los eventos más importantes tienen este formato:
 
 ```text
-[PAREJA 1] EMPAREJADOS: JUGADOR 1 (PUMA) VS JUGADOR 2 (PERROS)
-[MESA 1] INICIO PAREJA 1
-[MESA 1] fin. Ganador: PUMA | vivos: 6 | capturados: 6 | total: 12 | cierre: VICTORIA
-[MESA 1] LIBERADA. PAREJA 1 terminada. Resultado: 1 | cierre: VICTORIA
-[TORNEO] cierre normal. Partidas cerradas: 3 / 3
+[JUGADOR 4] llegada registrada. ORDEN 1
+[PAREJA 1] EMPAREJADOS: JUGADOR 4 (PUMA) VS JUGADOR 1 (PERROS)
+[MESA 2] INICIO PAREJA 1
+[MESA 2] tablero inicial:
+...
+[MESA 2] estado:
+...
+[MESA 2] tablero final:
+...
+[MESA 2] fin. Ganador: PUMA | vivos: 6 | capturados: 6 | total: 12 | cierre: VICTORIA
+[MESA 2] LIBERADA. PAREJA 1 terminada. Resultado: 1 | cierre: VICTORIA
+[TORNEO] cierre normal. Partidas cerradas: 2 / 2
 ```
 
-`cierre` puede ser `VICTORIA`, `ABANDONO`, `TIEMPO`, `SIGINT` o `FALLO INTERNO`. Resultado: `0` sin ganador, `1` gana el Puma, `2` ganan los Perros.
+Este bloque es **ilustrativo**: los IDs, mesa, posiciones, ganador y cantidad de capturas cambian entre ejecuciones.
 
-## Archivo de configuración
+En la línea de resultado:
 
-El archivo `config.txt` es opcional. Sirve para cambiar los ajustes de las partidas sin tocar el código: la velocidad de las fichas, la semilla del azar y la posición inicial del Puma y los Perros. Si no se entrega, se usan los valores por defecto.
+- **`vivos`**: Perros que quedan en el tablero; **`capturados`**: Perros retirados; la suma normalmente es 12.
+- **`Ganador`**: `PUMA`, `PERROS` o `NADIE`.
+- **`cierre`**: `VICTORIA` (regla del juego), `TIEMPO`, `ABANDONO`, `SIGINT` o `FALLO INTERNO`.
+- **`Resultado`**: `1` = Puma, `2` = Perros, `0` = sin ganador.
+- **`LIBERADA`**: la mesa terminó la partida y puede atender otra pareja.
+- **`Partidas cerradas: X / Y`**: resumen del torneo; puede ser menor que `Y` si se interrumpe.
 
-Se usa como tercer argumento:
+### Guardar el registro sin saturar la terminal
 
 ```bash
-./torneo 4 2 config.txt
+./torneo 6 2 config.txt > torneo.log 2>&1
+grep -E 'EMPAREJADOS|INICIO PAREJA|fin\. Ganador|LIBERADA|cierre normal|cierre por SIGINT' torneo.log
+less torneo.log       # presionar q para salir
 ```
 
-Cada línea tiene el formato `clave=valor`, y todo lo que está después de `#` es un comentario. El repositorio incluye un `config.txt` de ejemplo con los valores por defecto (salvo la semilla, que es 42).
+Se recomienda **redirigir a un archivo regular** cuando hay muchos tableros. Una salida dirigida a un pipe lleno sin consumidor puede bloquear al escritor y retrasar el cierre por SIGINT: es una limitación conocida.
 
-| Clave | Por defecto | Qué cambia |
+## 5. Archivo `config.txt`
+
+El repositorio incluye un ejemplo. Cada línea utiliza `clave=valor`, permite espacios alrededor del signo `=` y admite comentarios con `#`.
+
+```ini
+minMs=50
+maxMs=300
+semilla=42
+maxSegundos=60
+logCadaMs=2000
+puma=0
+perros=13,17,18,23,19,24,20,25,21,26,22,27
+```
+
+| Clave | Valor predeterminado | Uso |
 |---|---|---|
-| `minMs`, `maxMs` | 50, 300 | Cada ficha espera un tiempo al azar entre estos dos valores (en milisegundos) antes de moverse |
-| `semilla` | 1 | Con la misma semilla las decisiones al azar se repiten |
-| `maxSegundos` | 60 | Duración máxima de una partida |
-| `logCadaMs` | 2000 | Cada cuántos milisegundos se imprime el tablero |
-| `puma` | 0 | Nodo donde parte el Puma (0 es el trono) |
-| `perros` | 13,17,18,23,19,24,20,25,21,26,22,27 | Nodos donde parten los 12 perros |
+| `minMs` | `50` | Retardo mínimo de una ficha, en milisegundos. |
+| `maxMs` | `300` | Retardo máximo; debe ser mayor o igual a `minMs`. |
+| `semilla` | `1` | Semilla inicial de la selección aleatoria. |
+| `maxSegundos` | `60` | Límite **aproximado** de duración de cada partida. |
+| `logCadaMs` | `2000` | Intervalo **aproximado** de impresión del estado. |
+| `puma` | `0` | Nodo inicial del Puma. |
+| `perros` | `13,17,18,23,19,24,20,25,21,26,22,27` | Exactamente 12 posiciones de perros. |
 
-Los nodos van de 0 a 27 y no pueden repetirse ni coincidir con el del Puma. Si algún valor es inválido, el programa muestra un error con el número de línea y no inicia el torneo.
+Las posiciones deben estar entre `0` y `27`, sin superposiciones. Una configuración inválida o un archivo inexistente se rechazan **antes de crear los hilos del torneo**. Si se omite una clave, se usa su valor predeterminado.
 
-## Simulación de abandono o fallo
+La semilla fija las secuencias aleatorias propias de los hilos; **no garantiza tableros finales idénticos**, porque el sistema operativo puede ejecutar los hilos en diferente orden.
 
-Para probar el manejo de desconexiones hay dos variables de entorno, solo para pruebas (no usar ambas a la vez). Reciben el ID de un jugador que tenga pareja:
+### Configuración breve para ensayar
 
-```bash
-KOMIKAN_ABANDONA=1 ./torneo 2 1 config.txt        # el jugador 1 abandona
-KOMIKAN_FALLO_JUGADOR=2 ./torneo 2 1 config.txt   # el jugador 2 sufre un fallo controlado
+Guardar, por ejemplo, como `config_corta.txt`:
+
+```ini
+minMs=50
+maxMs=100
+maxSegundos=2
+logCadaMs=1000
 ```
 
-El oponente gana con `cierre: ABANDONO`. Como el rol depende del orden de llegada, quién gana puede variar entre ejecuciones.
-
-## Pruebas
-
-Los tests están en `tests/` y se compilan uno a uno, por ejemplo:
+Y ejecutar:
 
 ```bash
-g++ -Wall -Wextra -Werror -std=c++17 -pthread -I src tests/prueba_cierre.cpp -o prueba_cierre && ./prueba_cierre
+./torneo 4 2 config_corta.txt > prueba.log 2>&1
 ```
 
-`tests/prueba_llegadas.cpp` necesita además `-Wl,--wrap=pthread_create` y se ejecuta con un orden de llegada forzado: `KOMIKAN_ORDEN_PRUEBA=4,1,3,2 ./prueba_llegadas 4 2`.
+## 6. Abandono, fallos controlados y SIGINT
+
+El abandono se notifica desde el hilo del jugador y el juez finaliza solo **su partida**. Si abandona el Puma, ganan los Perros; si abandona el jugador de los Perros, gana el Puma. Las demás mesas continúan jugando.
+
+Para **simular** esos eventos se aceptan variables de entorno (indican el **ID real** del jugador, no su rol):
+
+```bash
+KOMIKAN_ABANDONA=1 ./torneo 2 1 config_corta.txt
+KOMIKAN_FALLO_JUGADOR=2 ./torneo 2 1 config_corta.txt
+```
+
+Usar solo una variable a la vez. **El rol depende del orden de llegada**: para saber quién abandona como Puma o Perros, revisar el mensaje `EMPAREJADOS`. Una simulación de fallo controlado no equivale a poder recuperarse de una caída arbitraria del proceso o de un hilo.
+
+**Para interrumpir todo el torneo:** presionar `Ctrl+C`. El receptor de `SIGINT` solicita parada global, despierta las esperas y finaliza ordenadamente cuando los hilos pueden continuar; se devuelve código **130**. SIGINT **no equivale** a abandono de un jugador. Un error interno global devuelve normalmente código **1** y una ejecución normal código **0**.
+
+## 7. Arquitectura y sincronización
+
+- **N hilos de jugadores:** registran llegadas, se emparejan y esperan resultados.
+- **Hasta `min(M, N/2)` hilos de mesa:** cada uno hace de juez, coordina una partida y reutiliza la mesa.
+- **13 hilos de fichas por partida activa:** un Puma y doce Perros, salvo terminación inmediata o fallos durante su creación.
+- **Un receptor de señales:** espera SIGINT mediante `sigwait()`.
+- **Mutex y condición del torneo:** protegen parejas, espera pasiva, paradas y resultados.
+- **Mutex y condición por tablero:** serializan cada movimiento/captura y permiten despertar las fichas al cerrar.
+- **Mutex global de consola:** evita que se intercalen las impresiones de distintas mesas.
+- **`pthread_join()`:** se espera la finalización de los hilos creados antes de liberar los recursos compartidos utilizados.
+
+La decisión de usar **un mutex por tablero** simplifica la integridad de los movimientos y capturas, aunque impide realizar dos modificaciones simultáneas dentro de la misma partida. **Mesas diferentes sí pueden jugar concurrentemente.**
+
+## 8. Archivos y pruebas
+
+```text
+src/main.cpp       Servidor, emparejamiento por llegada, mesas, SIGINT y jugadores
+src/mesa.hpp       Partida, juez, hilos de fichas, cierre y resultados
+src/tablero.hpp    Geometría, movimientos, capturas y condiciones de victoria
+src/config.hpp     Lectura y validación de configuración
+tests/prueba_*.cpp Pruebas C++ de geometría, saltos, capturas, concurrencia y cierres
+config.txt         Ejemplo de configuración
+README.md          Esta guía
+informe.pdf        Informe técnico de entrega (máximo 2 páginas)
+```
+
+Ejemplo para compilar y ejecutar una prueba individual:
+
+```bash
+g++ -Wall -Wextra -Werror -std=c++17 -pthread -I src tests/prueba_cierre.cpp -o /tmp/prueba_cierre
+/tmp/prueba_cierre
+```
+
+La prueba de **orden controlado de llegadas** necesita una opción de enlace especial porque intercepta `pthread_create` solo en el ejecutable de pruebas:
+
+```bash
+g++ -Wall -Wextra -Werror -std=c++17 -pthread -I src tests/prueba_llegadas.cpp -Wl,--wrap=pthread_create -o /tmp/prueba_llegadas
+KOMIKAN_ORDEN_PRUEBA=4,1,3,2 /tmp/prueba_llegadas 4 2 config_corta.txt
+```
+
+Se esperan las parejas **4–1** y **3–2**. La variable `KOMIKAN_ORDEN_PRUEBA` pertenece a ese ejecutable de pruebas, **no al servidor normal**.
+
+## 9. Limitaciones y alcance
+
+- La simulación es automática, no un juego interactivo por teclado.
+- La planificación concurrente puede cambiar el orden de movimientos aunque se repita la semilla.
+- `maxSegundos` y `logCadaMs` son tiempos aproximados, calculados por ciclos del juez.
+- La capacidad para N y M elevados depende de los recursos disponibles; no se garantiza ejecutar cualquier cantidad de hilos.
+- Los abandonos y fallos locales detectados pueden notificarse. No hay recuperación general frente a corrupción de memoria, bloqueos irreversibles o caídas del proceso.
+- Si la salida estándar se bloquea por falta de consumidor, el cierre puede demorarse. Para conservar registros en torneos grandes, usar un archivo regular.
 
 ## Autores
 
