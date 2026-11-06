@@ -192,7 +192,7 @@ src/config.hpp     Lectura y validación de configuración
 tests/prueba_*.cpp Pruebas C++ de geometría, saltos, capturas, concurrencia y cierres
 config.txt         Ejemplo de configuración
 README.md          Esta guía
-informe.pdf        Informe técnico de entrega (máximo 2 páginas)
+informe_tarea2_so.pdf        Informe técnico de entrega (máximo 2 páginas)
 ```
 
 Ejemplo para compilar y ejecutar una prueba individual:
